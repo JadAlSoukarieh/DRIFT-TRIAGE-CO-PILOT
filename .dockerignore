@@ -12,3 +12,6 @@ __pycache__/
 *.md
 tests/
 node_modules/
+
+#project brief
+/project-brief/
