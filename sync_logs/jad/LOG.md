@@ -77,3 +77,89 @@ Already scaffolded — verify CI pipeline
 
 ### Blockers
 - None
+
+---
+
+## 2026-05-05 — Jad / Codex
+
+### Goal
+Implemented agent foundation and performed read-only MLflow/platform dependency check.
+
+### Branch
+feature/agent-foundation
+
+### Files Changed
+- agent/app/config/settings.py
+- agent/app/schemas/drift_alert.py
+- agent/app/schemas/investigation.py
+- agent/app/schemas/hil_action.py
+- agent/app/prompts/supervisor.txt
+- agent/app/prompts/triage.txt
+- agent/app/prompts/action.txt
+- agent/app/prompts/comms.txt
+- agent/pyproject.toml
+- agent/tests/test_agent_schemas.py
+- sync_logs/jad/LOG.md
+
+### Commands Run
+- `git status`
+- `git checkout -b feature/agent-foundation`
+- `git checkout feature/agent-foundation`
+- `git status`
+- `Get-ChildItem agent -File -Recurse -Depth 4`
+- `Get-ChildItem contracts -File -Recurse -Depth 3`
+- `Get-ChildItem platform -File -Recurse -Depth 4`
+- `Get-ChildItem mlflow -File -Recurse -Depth 3`
+- `Get-ChildItem -Force`
+- `Get-ChildItem sync -Force`
+- `Get-ChildItem -Recurse -Force sync_logs`
+- `Get-Content agent/pyproject.toml`
+- `Get-Content agent/app/config/settings.py`
+- `Get-Content agent/app/schemas/drift_alert.py`
+- `Get-Content agent/app/schemas/investigation.py`
+- `Get-Content agent/app/schemas/hil_action.py`
+- `Get-Content contracts/webhook_v1.json`
+- `Get-Content contracts/promote_v1.json`
+- `Get-Content platform/app/config/settings.py`
+- `Get-Content platform/app/routers/registry.py`
+- `Get-Content platform/app/routers/drift.py`
+- `Get-Content platform/app/schemas/promote_request.py`
+- `Get-Content platform/app/schemas/drift_report.py`
+- `Get-Content platform/app/services/run_training.py`
+- `Get-Content platform/app/services/validate_promotion.py`
+- `Get-Content agent/app/prompts/supervisor.txt`
+- `Get-Content agent/app/prompts/triage.txt`
+- `Get-Content agent/app/prompts/action.txt`
+- `Get-Content agent/app/prompts/comms.txt`
+- `Get-Content agent/tests/test_trajectories.py`
+- `python - <<'PY' ... import pydantic / pydantic_settings ... PY`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+
+### Results
+Passed. Schema/config/prompt foundation added, and `python -m unittest discover -s agent/tests -p "test_*.py"` now passes.
+Note: the first run failed because the local interpreter is Python 3.10 and `datetime.UTC` is unavailable there; the test was updated to use `timezone.utc` and the rerun passed.
+Note: the current base Python environment still does not have `pydantic_settings` installed, but `agent/pyproject.toml` now declares it for the agent service.
+
+### Dependency Check
+- MLflow ready: no. The only concrete MLflow evidence is `initial-training/pipeline/mlflow.db` plus notebook output; platform MLflow settings and training service are still TODO stubs, candidate alias handling is not implemented, and artifact/hash/fingerprint loading is not available through platform code.
+- platform drift webhook ready: no. `platform/app/routers/drift.py` is a TODO stub, and the current contract file is a minimal `contracts/webhook_v1.json` shape that does not yet match the richer agent webhook schema.
+- promote endpoint ready: no. `platform/app/routers/registry.py`, `platform/app/schemas/promote_request.py`, and `platform/app/services/validate_promotion.py` are still TODO stubs.
+- blockers for agent integration: no implemented platform webhook sender, no implemented promote endpoint, no reliable candidate alias/programmatic registry surface, and no platform-exposed access to schema/model card/hash/fingerprint artifacts.
+
+### Assumptions
+- Platform will send drift events to POST /webhook/drift.
+- Production changes require HIL approval.
+- Prompts are stored as files.
+
+### Decisions Made
+- Drift schema uses schema_version = v1.
+- External webhook schemas use extra="forbid".
+- HIL action defaults to pending.
+
+### Do Not Touch
+- DriftAlert schema without coordination.
+- HILAction schema without coordination.
+- Prompt filenames without coordination.
+
+### Next Safe Task
+Implement checkpoint manager and HIL approval persistence service.
