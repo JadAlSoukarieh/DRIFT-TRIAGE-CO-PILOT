@@ -163,3 +163,72 @@ Note: the current base Python environment still does not have `pydantic_settings
 
 ### Next Safe Task
 Implement checkpoint manager and HIL approval persistence service.
+
+---
+
+## 2026-05-05 — Jad / Codex
+
+### Goal
+Implemented agent Postgres persistence foundation for investigations and HIL approvals.
+
+### Branch
+feature/agent-hil-persistence
+
+### Files Changed
+- postgres/init.sql
+- docker-compose.yml
+- agent/app/services/manage_checkpoints.py
+- agent/app/services/request_approval.py
+- agent/pyproject.toml
+- agent/tests/test_request_approval.py
+- sync_logs/jad/LOG.md
+
+### Commands Run
+- `git status`
+- `git checkout -b feature/agent-hil-persistence`
+- `git checkout feature/agent-hil-persistence`
+- `Get-ChildItem agent -File -Recurse -Depth 5`
+- `Get-ChildItem postgres -File -Recurse -Depth 3`
+- `Get-Content docker-compose.yml`
+- `Get-Content agent/app/config/settings.py`
+- `Get-Content agent/app/schemas/hil_action.py`
+- `Get-Content agent/app/schemas/investigation.py`
+- `Get-Content agent/app/services/manage_checkpoints.py`
+- `Get-Content agent/app/services/request_approval.py`
+- `Get-Content agent/pyproject.toml`
+- `Get-Content sync_logs/jad/LOG.md`
+- `rg -n "asyncpg|AsyncPostgresSaver|checkpointer|approval|hil_approvals|investigations|idempotency" agent platform postgres -S`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `git branch --show-current`
+- `git status --short`
+- `python - <<'PY' ... import asyncpg / pydantic_settings / langgraph ... PY`
+
+### Results
+Passed.
+
+### Tests
+- Command: `python -m unittest discover -s agent/tests -p "test_*.py"`
+- Output:
+  `.............`
+  `----------------------------------------------------------------------`
+  `Ran 13 tests in 0.255s`
+  `OK`
+
+### Assumptions
+- Postgres init SQL runs on first database container creation.
+- HIL approvals are stored in Postgres.
+- Production-impacting actions will later require approved HILAction.
+- Full LangGraph resume logic comes later.
+
+### Decisions Made
+- HIL approvals use idempotency_key with UNIQUE constraint.
+- Duplicate approval requests return the existing approval instead of creating duplicates.
+- Only pending approvals can transition to approved/rejected.
+
+### Do Not Touch
+- hil_approvals schema without coordination.
+- HILAction schema without coordination.
+- idempotency_key format without coordination.
+
+### Next Safe Task
+Implement Redis dispatch tools or start LangGraph graph skeleton after HIL persistence is stable.
