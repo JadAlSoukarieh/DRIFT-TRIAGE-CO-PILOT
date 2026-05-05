@@ -1,0 +1,52 @@
+{
+  "numeric_features": [
+    "pdays_never_contacted",
+    "age",
+    "campaign",
+    "pdays",
+    "previous",
+    "emp.var.rate",
+    "cons.price.idx",
+    "cons.conf.idx",
+    "euribor3m",
+    "nr.employed"
+  ],
+  "categorical_features": [
+    "job",
+    "marital",
+    "education",
+    "default",
+    "housing",
+    "loan",
+    "contact",
+    "month",
+    "day_of_week",
+    "poutcome"
+  ],
+  "target": {
+    "name": "y",
+    "classes": [
+      "no",
+      "yes"
+    ],
+    "encoding": {
+      "no": 0,
+      "yes": 1
+    }
+  },
+  "preprocessing": {
+    "numeric": "StandardScaler",
+    "categorical": "OneHotEncoder(handle_unknown='ignore', drop=None)"
+  },
+  "pipeline_steps": [
+    "preprocessor",
+    "classifier"
+  ],
+  "classifier": "HistGradientBoostingClassifier",
+  "hyperparameters": {
+    "class_weight": "balanced",
+    "max_iter": 200,
+    "max_depth": null,
+    "random_state": 42
+  }
+}
