@@ -13,7 +13,11 @@ mlruns/
 *.joblib
 *.nbconvert.ipynb
 
-# Docker
-Dockerfile
+#environment variables
+.env
+*/.env
 
+# Internal docs (not for submission)
 SCAFFOLD.md
+plan.md
+GUIDELINES.md

@@ -1,0 +1,2 @@
+# model.joblib is excluded from git — copy it here manually after training.
+# reference_stats.json is auto-populated by the drift service on first boot.

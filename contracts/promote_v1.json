@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PromoteRequest v1",
+  "type": "object",
+  "required": ["model_uri", "approved_by", "investigation_id", "timestamp"],
+  "properties": {
+    "model_uri": { "type": "string" },
+    "approved_by": { "type": "string" },
+    "investigation_id": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}
