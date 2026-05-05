@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         extra="forbid",
     )
 
+    # Default: Docker service name. Override via .env to http://localhost:5000 for local dev.
     mlflow_tracking_uri: str = "http://mlflow:5000"
     agent_base_url: str = "http://agent:8001"
     model_path: str = "data/model.joblib"
