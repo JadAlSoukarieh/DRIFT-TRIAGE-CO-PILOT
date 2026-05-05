@@ -1,0 +1,16 @@
+creation_timestamp: 1778009252750
+current_stage: None
+deployment_job_state: null
+description: null
+last_updated_timestamp: 1778009252750
+model_id: m-1e9e7dc6274245c6b7d6c4fb86f3f869
+name: bank_marketing_pipeline
+run_id: f1f054632cb54a52b9911c7d48b3edbb
+run_link: null
+source: models:/m-1e9e7dc6274245c6b7d6c4fb86f3f869
+status: READY
+status_message: null
+storage_location: file:///home/hadym/AIE-BOOTCAMP/Week5/project/platform/data/550324106225392376/models/m-1e9e7dc6274245c6b7d6c4fb86f3f869/artifacts
+user_id: null
+version: 1
+workspace: default

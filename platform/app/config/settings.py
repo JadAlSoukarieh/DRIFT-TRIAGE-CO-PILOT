@@ -17,7 +17,10 @@ class Settings(BaseSettings):
     mlflow_tracking_uri: str = "http://mlflow:5000"
     agent_base_url: str = "http://agent:8001"
     model_path: str = "data/model.joblib"
+    dataset_path: str = "data/bank-additional-full.csv"
     threshold: float = 0.3493
+    min_recall: float = 0.75
+    cv_folds: int = 5
     drift_window_size: int = 500
     drift_severity_moderate: float = 0.10
     drift_severity_critical: float = 0.25
