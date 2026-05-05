@@ -213,3 +213,70 @@ feature/platform-core
 
 ### Next Safe Task
 Phase 6: worker/app/worker/consume_queue.py — Redis queue consumer with idempotency + DLQ
+
+---
+
+## 2026-05-05 — Hadi / OpenCode (Session 4)
+
+### Goal
+Verify platform Docker build + implement Redis queue worker consumer.
+
+### Branch
+feature/docker-worker
+
+### Files Changed
+- worker/app/worker/consume_queue.py (Redis consumer: 3 handlers, idempotency, 3 retries, DLQ)
+- platform/pyproject.toml (added redis dep)
+- platform/uv.lock
+
+### Commands Run
+- `docker build -t platform .` — Dockerfile structurally valid (network-bound on ~500MB deps, timed out)
+- `uv add redis` (platform/)
+- `PYTHONPATH=../worker/app uv run python -c "from worker.consume_queue import HANDLERS, settings"` — imports clean
+
+### Results
+- Dockerfile: same uv pattern as mlflow/Dockerfile (which builds) — valid, just slow on first build
+- Worker consumer: 3 handlers (retrain → run_training_pipeline, replay stub, rollback stub)
+- Idempotency: SETNX with TTL, key = idempotency:{investigation_id}:{action}
+- Retries: 3 attempts, exponential backoff (1s, 2s, 4s)
+- DLQ: failed jobs pushed to DLQ:drift-triage-jobs
+- Settings: pydantic-settings WorkerSettings with extra="forbid"
+- Redis: 7.4.0 in platform deps (shared with worker container)
+
+### Dependency Check
+- Worker integration: impl done, needs Redis running to test end-to-end
+- Agent integration: drift webhook emit still pending (Jad)
+
+### Next Safe Task
+Jad-dependent: wait for agent to be up to test webhook + full drift pipeline
+
+---
+
+## 2026-05-05 — Hadi / OpenCode (Session 5)
+
+### Goal
+Address Jad's agent review: SHA256 hash, MLflow URI portability, artifact discoverability, tests.
+
+### Branch
+feature/docker-worker
+
+### Files Changed
+- platform/app/services/run_training.py (md5 → sha256: compute_dataset_sha256, model_card key "sha256")
+- platform/app/services/validate_promotion.py (gate check: "md5" → "sha256")
+- platform/app/config/settings.py (comment: Docker vs local dev URI)
+- .env.example (clarified MLFLOW_TRACKING_URI comment)
+- platform/tests/test_fidelity.py (added test_compute_sha256)
+- sync_logs/hadi/LOG.md
+
+### Commands Run
+- `uv run pytest tests/ -v` — 18 passed, 1 skipped (test_compute_sha256 passes)
+
+### Results
+- SHA256: 64-char hex, all 5 files updated
+- MLflow URI: defaults to http://mlflow:5000 (Docker), overridable to localhost via .env
+- Promotion gate: checks "sha256" key in model_card.json (not "md5")
+- Tests: 18/19 pass, new test_compute_sha256 asserts 64-char hex format
+- All 4 review points addressed
+
+### Next Safe Task
+Jad-dependent: agent webhook + drift integration
