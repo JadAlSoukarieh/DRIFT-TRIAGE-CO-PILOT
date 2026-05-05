@@ -1,15 +1,44 @@
-# platform/app/main.py
 """FastAPI application assembly.
 
 Lifespan:
 - Load model.joblib and operating threshold from disk
-- Store in app.state.model and app.state.threshold
-- Optionally spawn background drift-monitor task
+- Create shared httpx client
+- Store in app.state.model, app.state.threshold, app.state.http_client
 
 Routers mounted:
 - /predict  → routers/predict.py
 - /drift    → routers/drift.py
 - /registry → routers/registry.py
-
-TODO: Implement lifespan, mount routers, configure CORS and structured logging.
 """
+
+from contextlib import asynccontextmanager
+
+import httpx
+from fastapi import FastAPI
+
+from app.config.settings import Settings
+from app.dependencies import load_model
+from app.routers import drift, predict, registry
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = Settings()
+    app.state.settings = settings
+    app.state.model = load_model(settings.model_path)
+    app.state.threshold = settings.threshold
+    app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
+    yield
+    await app.state.http_client.aclose()
+
+
+app = FastAPI(title="Drift Triage Platform", version="0.1.0", lifespan=lifespan)
+
+app.include_router(predict.router, prefix="/predict", tags=["predict"])
+app.include_router(drift.router, prefix="/drift", tags=["drift"])
+app.include_router(registry.router, prefix="/registry", tags=["registry"])
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
