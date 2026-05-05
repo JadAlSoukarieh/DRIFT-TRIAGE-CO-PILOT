@@ -66,3 +66,13 @@ def test_openapi_schema(test_client):
     assert "/predict/" in schema["paths"]
     assert "/drift/report" in schema["paths"]
     assert "/registry/promote" in schema["paths"]
+
+
+def test_drift_report_endpoint(test_client):
+    """GET /drift/report returns 200 with report and webhook_sent fields."""
+    response = test_client.get("/drift/report")
+    assert response.status_code == 200
+    data = response.json()
+    assert "report" in data
+    assert "webhook_sent" in data
+    assert data["report"]["severity"] == "stable"
