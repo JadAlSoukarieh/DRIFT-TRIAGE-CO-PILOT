@@ -1,0 +1,10 @@
+artifact_location: file:///home/hadym/AIE-BOOTCAMP/Week5/project/platform/data/550324106225392376/models/m-1e9e7dc6274245c6b7d6c4fb86f3f869/artifacts
+creation_timestamp: 1778009251869
+experiment_id: '550324106225392376'
+last_updated_timestamp: 1778009252742
+model_id: m-1e9e7dc6274245c6b7d6c4fb86f3f869
+model_type: null
+name: model
+source_run_id: f1f054632cb54a52b9911c7d48b3edbb
+status: 2
+status_message: null
