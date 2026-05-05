@@ -3,4 +3,15 @@ name = "platform"
 version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.30",
+    "httpx>=0.28",
+    "pydantic-settings>=2.6",
+    "scikit-learn>=1.5",
+    "pandas>=2.2",
+    "numpy>=2.1",
+    "mlflow>=3.12",
+    "joblib>=1.4",
+    "structlog>=24.4",
+]

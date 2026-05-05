@@ -1,10 +1,20 @@
-# platform/app/services/find_threshold.py
-"""Operating threshold from precision-recall trade-off.
+"""Operating threshold via precision-recall trade-off.
 
-Week 5 Day 2 rule: find the highest threshold where recall >= min_recall.
-
+Week 5 Day 2 rule: highest threshold where recall >= min_recall.
 Ported from initial-training notebook.
-Accepts y_true, y_proba arrays, returns float threshold.
-
-TODO: Implement find_threshold(y_true, y_proba, min_recall=0.75) -> float.
 """
+
+import numpy as np
+from sklearn.metrics import precision_recall_curve
+
+
+def find_threshold(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+    min_recall: float = 0.75,
+) -> float:
+    precision, recall, thresholds = precision_recall_curve(y_true, y_proba)
+    valid = recall[:-1] >= min_recall
+    if valid.any():
+        return float(thresholds[valid].max())
+    return 0.5

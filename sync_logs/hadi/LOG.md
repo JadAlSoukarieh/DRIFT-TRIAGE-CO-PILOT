@@ -58,7 +58,8 @@ Already done — verify it works with docker-compose
 
 ## 2026-05-05
 ### Completed
-- (nothing yet)
+- Phase 1: settings.py, schemas (4 models), find_threshold.py, compute_drift.py — all tested and passing
+- platform/pyproject.toml: added dependencies (fastapi, uvicorn, httpx, pydantic-settings, sklearn, pandas, mlflow, joblib, structlog)
 
 ### Changed
 - (nothing yet)

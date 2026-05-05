@@ -1,7 +1,8 @@
-# platform/app/schemas/predict_response.py
-"""Pydantic model for POST /predict response.
+"""POST /predict response — final prediction after thresholding."""
 
-TODO: Define PredictResponse with:
-- prediction: int (0 or 1, based on threshold)
-- probability: float (raw positive-class probability)
-"""
+from pydantic import BaseModel
+
+
+class PredictResponse(BaseModel):
+    prediction: int
+    probability: float
