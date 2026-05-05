@@ -15,3 +15,5 @@ mlruns/
 
 # Docker
 Dockerfile
+
+SCAFFOLD.md
