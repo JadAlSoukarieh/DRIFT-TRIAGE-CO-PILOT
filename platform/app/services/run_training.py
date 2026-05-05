@@ -90,8 +90,8 @@ def find_threshold(y_true: np.ndarray, y_proba: np.ndarray, min_recall: float = 
     return 0.5
 
 
-def compute_dataset_hash(csv_path: str) -> str:
-    return hashlib.md5(Path(csv_path).read_bytes()).hexdigest()
+def compute_dataset_sha256(csv_path: str) -> str:
+    return hashlib.sha256(Path(csv_path).read_bytes()).hexdigest()
 
 
 def run_training_pipeline(dataset_path: str | None = None) -> str:
@@ -206,13 +206,13 @@ def run_training_pipeline(dataset_path: str | None = None) -> str:
         mlflow.log_dict(schema, "schema.json")
 
         # Model card
-        dataset_hash = compute_dataset_hash(ds_path)
+        dataset_sha256 = compute_dataset_sha256(ds_path)
         model_card = {
             "model_name": "HistGradientBoostingClassifier",
             "training_timestamp": datetime.now(timezone.utc).isoformat(),
             "dataset": {
                 "source": str(ds_path),
-                "md5": dataset_hash,
+                "sha256": dataset_sha256,
                 "rows": len(df),
                 "features": len(NUMERIC_FEATURES) + len(CATEGORICAL_FEATURES),
                 "positive_class_ratio": round(float(y.mean()), 4),

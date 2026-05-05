@@ -76,8 +76,8 @@ def assert_promotion_checklist(model_uri: str) -> None:
     with open(card_path) as f:
         card = json.load(f)
 
-    if "dataset" not in card or "md5" not in card.get("dataset", {}):
-        raise ValueError("model_card.json missing dataset.md5 hash.")
+    if "dataset" not in card or "sha256" not in card.get("dataset", {}):
+        raise ValueError("model_card.json missing dataset.sha256 hash.")
 
     if "environment" not in card:
         raise ValueError("model_card.json missing environment fingerprint.")

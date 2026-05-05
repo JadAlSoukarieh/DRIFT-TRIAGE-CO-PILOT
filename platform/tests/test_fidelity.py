@@ -34,3 +34,10 @@ def test_predictions_stable():
 @pytest.mark.skip(reason="model.joblib is gitignored — run locally")
 def test_predictions_stable_after_reload():
     pass
+
+
+def test_compute_sha256():
+    from app.services.run_training import compute_dataset_sha256
+    sha = compute_dataset_sha256("data/bank-additional-full.csv")
+    assert len(sha) == 64
+    assert all(c in "0123456789abcdef" for c in sha)
