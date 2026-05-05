@@ -166,4 +166,50 @@ Training output:
 - Worker integration: worker consumer still TODO
 
 ### Next Safe Task
-Phase 5: platform/app/routers/registry.py — wire validate_promotion.py to the promotion endpoint
+Phase 2 (pulled forward): implement run_training.py + validate_promotion.py → prove all 6 requirements from Jad's agent
+
+---
+
+## 2026-05-05 — Hadi / OpenCode (Session 3)
+
+### Goal
+Wire platform skeleton: dependencies, main assembly, predict router, registry router, drift stub. Add full test suite.
+
+### Branch
+feature/platform-core
+
+### Files Changed
+- platform/app/dependencies.py (Depends() singletons: model, threshold, http_client)
+- platform/app/main.py (lifespan, router mounting, /health)
+- platform/app/routers/predict.py (POST /predict — full pipeline)
+- platform/app/routers/registry.py (POST /registry/promote)
+- platform/app/routers/drift.py (APIRouter stub for /drift/report)
+- platform/tests/conftest.py (TestClient fixture)
+- platform/tests/test_api.py (6 tests)
+- platform/tests/test_drift.py (9 tests)
+- platform/tests/test_fidelity.py (3 tests)
+- platform/pyproject.toml (added pytest dev dep)
+- platform/uv.lock
+- .vscode/settings.json (Python interpreter per project)
+
+### Commands Run
+- `uv add --dev pytest`
+- `uv run pytest tests/ -v` — 17 passed, 1 skipped
+- `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000` — health, predict, 422 all verified
+
+### Results
+- GET /health → 200 {"status":"ok"}
+- POST /predict (valid) → 200 {"prediction":0,"probability":0.206...}
+- POST /predict (malformed) → 422 with per-field detail array
+- POST /predict (wrong types) → 422
+- Swagger at /docs with all 3 routers listed
+- 17/18 tests pass, 1 skipped (CI-only fidelity reload test)
+- Model loads and predictions stable within 1e-12
+
+### Dependency Check
+- Agent integration: drift router stub only; full webhook emit needs Jad's agent
+- Worker integration: still TODO
+- All platform core pieces now importable and testable
+
+### Next Safe Task
+Phase 6: worker/app/worker/consume_queue.py — Redis queue consumer with idempotency + DLQ
