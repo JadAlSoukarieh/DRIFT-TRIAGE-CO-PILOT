@@ -1,11 +1,11 @@
-# platform/app/schemas/promote_request.py
-"""Pydantic model for POST /registry/promote request body.
+"""POST /registry/promote request — mirrors contracts/promote_v1.json."""
 
-Mirrors the fields from contracts/promote_v1.json.
+from datetime import datetime
+from pydantic import BaseModel
 
-TODO: Define PromoteRequest with:
-- model_uri: str
-- approved_by: str
-- investigation_id: str
-- timestamp: datetime
-"""
+
+class PromoteRequest(BaseModel):
+    model_uri: str
+    approved_by: str
+    investigation_id: str
+    timestamp: datetime

@@ -55,7 +55,7 @@
 | 1 | Config | `agent/app/config/settings.py` | — |
 | 2 | Schemas | `schemas/drift_alert.py`, `investigation.py`, `hil_action.py` | Yes (3 small) |
 | 3 | Prompts | `prompts/supervisor.txt`, `triage.txt`, `action.txt`, `comms.txt` | Yes (4 small) |
-| 4 | Checkpoints | `agent/app/services/manage_checkpoints.py` | — |
+| 4 | Postgres setup | `agent/app/services/manage_checkpoints.py`, `postgres/init.sql`, `docker-compose.yml` mount | Yes (3) |
 | 5 | HIL service | `agent/app/services/request_approval.py` | — |
 | 6 | Dispatch tools | `tools/dispatch_retrain.py`, `dispatch_replay.py`, `dispatch_rollback.py` | Yes (3 small) |
 | 7 | Graph builder | `agent/app/graph/build_graph.py` | — |
@@ -68,7 +68,7 @@
 | 14 | Dashboard | `dashboard/app.py` | — |
 | 15 | Dashboard Dockerfile | `dashboard/Dockerfile` | — |
 | 16 | Docker compose | `docker-compose.yml`, `.env.example`, `.dockerignore`, `.pre-commit-config.yaml` | Already scaffolded ✅ |
-| 17 | Docs | `ARCH.md`, `DECISIONS.md`, `RUNBOOK.md` | Already scaffolded ✅ |
+| 17 | Docs | `ARCH.md`, `DECISIONS.md`, `RUNBOOK.md` (RUNBOOK: document notebook → model.joblib bootstrap) | Already scaffolded ✅ |
 | 18 | CI | `.github/workflows/ci.yml` | Already scaffolded ✅ |
 
 **Total: 18 tasks** (8 standalone, 7 bundles, 3 pre-scaffolded)
