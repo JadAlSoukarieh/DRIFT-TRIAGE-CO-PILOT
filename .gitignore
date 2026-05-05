@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+
+# ML artifacts
+mlruns/
+*.joblib
+*.nbconvert.ipynb
+
+# Docker
+Dockerfile

@@ -1,0 +1,15 @@
+[project]
+name = "initial-training"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas",
+    "scikit-learn",
+    "mlflow",
+    "joblib",
+    "matplotlib",
+    "jupyter>=1.1.1",
+    "ipykernel>=7.2.0",
+]
