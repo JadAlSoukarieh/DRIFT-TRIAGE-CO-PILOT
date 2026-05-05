@@ -337,3 +337,20 @@ main
 ### Blockers
 - Jad's agent must be running to test drift webhook integration
 - Full integration test needs all 7 services up via docker-compose
+
+---
+
+## 2026-05-06 — Hadi / OpenCode (Session 8)
+
+### Goal
+Update RUNBOOK with simpler model.joblib generation command.
+
+### Changes
+- RUNBOOK.md: replaced notebook execution step with `uv run python -m app.services.run_training` (1 command, no Jupyter needed)
+
+### Result
+Jad can generate model.joblib from a clean clone with:
+```bash
+cp initial-training/dataset/bank-additional-full.csv platform/data/
+cd platform && uv run python -m app.services.run_training
+```

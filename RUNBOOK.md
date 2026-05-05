@@ -9,11 +9,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ## Boot
 1. `cp .env.example .env` and fill in secrets
-2. Run initial training to generate model.joblib:
+2. Generate model.joblib (required before platform boots):
    ```bash
-   cd initial-training
-   uv run jupyter execute pipeline/data-cleaning-&-training.ipynb
-   cp pipeline/model.joblib ../platform/data/
+   cp initial-training/dataset/bank-additional-full.csv platform/data/
+   cd platform && uv run python -m app.services.run_training
    ```
 3. `docker-compose up --build`
 4. Open dashboard at http://localhost:8501
