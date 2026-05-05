@@ -1,11 +1,27 @@
-# agent/app/tools/dispatch_retrain.py
-"""Enqueue a retrain job.
+"""Enqueue retrain jobs for later worker execution."""
 
-1. Generate idempotency key from investigation_id + action type
-2. Push job payload to Redis: {investigation_id, action, model_uri, timestamp}
-3. Return job_id
+from __future__ import annotations
 
-Worker picks this up and calls platform.services.run_training.run_training_pipeline().
+from agent.app.tools.queue_client import enqueue_job
 
-TODO: Implement enqueue_retrain(payload: dict) -> str.
-"""
+
+async def dispatch_retrain(
+    investigation_id: str,
+    drift_event_id: str,
+    model_name: str,
+    reason: str | None = None,
+) -> dict:
+    """Queue a retrain job that produces a candidate model only."""
+
+    idempotency_key = f"retrain:{investigation_id}:{drift_event_id}"
+    payload = {
+        "investigation_id": investigation_id,
+        "drift_event_id": drift_event_id,
+        "model_name": model_name,
+        "reason": reason,
+    }
+    return await enqueue_job(
+        job_type="retrain",
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )

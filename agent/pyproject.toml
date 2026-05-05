@@ -7,4 +7,5 @@ dependencies = [
     "asyncpg>=0.29,<1",
     "pydantic>=2,<3",
     "pydantic-settings>=2,<3",
+    "redis>=5,<6",
 ]
