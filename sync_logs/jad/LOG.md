@@ -13,8 +13,10 @@ pydantic-settings: POSTGRES_DSN, REDIS_URL, PLATFORM_BASE_URL, LLM credentials
 ### 3. agent/app/prompts/supervisor.txt + triage.txt + action.txt + comms.txt
 4 prompt files — bundle as one task (all small)
 
-### 4. agent/app/services/manage_checkpoints.py
-AsyncPostgresSaver init from POSTGRES_DSN
+### 4. Postgres setup (checkpoints + HIL schema)
+- agent/app/services/manage_checkpoints.py — AsyncPostgresSaver init from POSTGRES_DSN
+- postgres/init.sql — CREATE TABLE IF NOT EXISTS hil_approvals (id, investigation_id, action, status, approved_by, created_at, updated_at)
+- docker-compose.yml — add init.sql volume mount: ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
 
 ### 5. agent/app/services/request_approval.py
 HIL: write pending approval to Postgres, check approval status
@@ -53,7 +55,8 @@ streamlit run with port 8501
 Already scaffolded — verify and fix any issues
 
 ### 17. ARCH.md + DECISIONS.md + RUNBOOK.md
-Already scaffolded — fill with real content after implementation
+Already scaffolded — fill with real content after implementation.
+RUNBOOK.md must include: (1) cp .env.example .env, (2) run initial-training notebook → copy model.joblib to platform/data/, (3) docker-compose up --build, (4) open dashboard at http://localhost:8501
 
 ### 18. .github/workflows/ci.yml
 Already scaffolded — verify CI pipeline
