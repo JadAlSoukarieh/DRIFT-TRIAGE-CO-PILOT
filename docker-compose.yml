@@ -1,0 +1,87 @@
+services:
+  platform:
+    build: ./platform
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./platform/data:/app/data
+    depends_on:
+      - mlflow
+    networks:
+      - drift-net
+
+  agent:
+    build: ./agent
+    ports:
+      - "8001:8001"
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - drift-net
+
+  worker:
+    build: ./worker
+    env_file: .env
+    volumes:
+      - ./platform/data:/app/data
+    depends_on:
+      - platform
+      - redis
+      - mlflow
+    networks:
+      - drift-net
+
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "8501:8501"
+    env_file: .env
+    depends_on:
+      - platform
+      - agent
+      - postgres
+      - redis
+    networks:
+      - drift-net
+
+  mlflow:
+    build: ./mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./platform/data:/data
+    networks:
+      - drift-net
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: drift
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - drift-net
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    networks:
+      - drift-net
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  drift-net:
+    driver: bridge
