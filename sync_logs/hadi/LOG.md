@@ -280,3 +280,33 @@ feature/docker-worker
 
 ### Next Safe Task
 Jad-dependent: agent webhook + drift integration
+
+---
+
+## 2026-05-06 — Hadi / OpenCode (Session 6)
+
+### Goal
+Address Jad's agent review: implement drift webhook emitter, add uv install instructions, fix CI.
+
+### Branch
+feature/drift-webhook
+
+### Files Changed
+- platform/app/routers/drift.py (emit_webhook() — async POST to agent /webhook/drift)
+- platform/tests/test_api.py (test_drift_report_endpoint: GET /drift/report → 200)
+- RUNBOOK.md (step 0: uv install prerequisite)
+- .github/workflows/ci.yml (pip install uv + setup-python steps)
+- sync_logs/hadi/LOG.md
+
+### Commands Run
+- `uv run pytest tests/ -k "drift or api"` — 8 passed
+
+### Results
+- emit_webhook(): async POST DriftReport to agent with 10s timeout and RequestError handling
+- GET /drift/report: returns report + webhook_sent boolean
+- test_drift_report_endpoint: asserts 200 + severity == "stable" + webhook_sent field
+- RUNBOOK: curl | sh or pip install uv instructions
+- CI: proper uv + Python 3.12 setup before tests
+
+### Next Safe Task
+Wait for Jad's agent to test full webhook → investigation flow
