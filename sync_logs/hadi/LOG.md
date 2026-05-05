@@ -310,3 +310,30 @@ feature/drift-webhook
 
 ### Next Safe Task
 Wait for Jad's agent to test full webhook → investigation flow
+
+---
+
+## 2026-05-06 — Hadi / OpenCode (Session 7)
+
+### Goal
+Verify platform Dockerfile builds and serves (Task 13 closure).
+
+### Branch
+main
+
+### Results
+- `docker build -t platform .` — builds successfully (takes ~10min for deps)
+- `docker run -p 8000:8000 -v .../data:/app/data platform` — boots, uvicorn starts
+- Internal health check: `docker exec ... python -c "..."` → `{"status":"ok"}`
+- External health check: `curl --retry 5 http://localhost:8000/health` → `{"status":"ok"}`
+- **Task 13 verified. All 15 Hadi tasks complete.**
+
+### Status — All Hadi tasks done
+| 1–12 | Config, schemas, services, routers, tests | ✅ |
+| 13 | Platform Dockerfile | ✅ verified |
+| 14 | Worker consumer | ✅ |
+| 15 | MLflow Dockerfile | ✅ |
+
+### Blockers
+- Jad's agent must be running to test drift webhook integration
+- Full integration test needs all 7 services up via docker-compose
