@@ -1,5 +1,5 @@
 """Agent API routers."""
 
-from agent.app.routers import webhook
+from agent.app.routers import hil, webhook
 
-__all__ = ["webhook"]
+__all__ = ["hil", "webhook"]

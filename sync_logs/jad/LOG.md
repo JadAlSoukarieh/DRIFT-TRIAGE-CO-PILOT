@@ -603,125 +603,66 @@ Run platform -> agent webhook integration test, then wire optional Redis dispatc
 
 ---
 
-## 2026-05-05 - Jad / Codex Webhook Integration Test
-
-### Goal
-Created temporary integration branch and tested latest platform main with unmerged agent webhook receiver.
-
-### Branch
-`test/webhook-integration`
-
-### Merged Sources
-- `main`
-- `feature/agent-webhook-graph-skeleton`
-
-### Commands Run
-- `git status`
-- `git fetch origin --prune`
-- `git checkout main`
-- `git pull origin main`
-- `git log --oneline --decorate -5`
-- `git checkout -b test/webhook-integration`
-- `git merge feature/agent-webhook-graph-skeleton`
-- `python -m unittest discover -s agent/tests -p "test_*.py"`
-- `uv --version`
-- `C:\Users\Jad\.local\bin\uv.exe --version`
-- `C:\Users\Jad\.local\bin\uv.exe sync`
-- `C:\Users\Jad\.local\bin\uv.exe run pytest tests/ -v -p no:cacheprovider`
-- `python -m uvicorn agent.app.main:app --host 127.0.0.1 --port 8001`
-- `curl http://127.0.0.1:8001/health`
-- `curl -X POST http://127.0.0.1:8001/webhook/drift`
-- `curl http://127.0.0.1:8000/health`
-- `curl http://127.0.0.1:8000/drift/report`
-
-### Results
-- Agent tests: passed (`Ran 27 tests`, `OK`).
-- Platform tests: `uv sync` failed due local outbound/download issue, but fallback platform test run from `platform/` passed (`19 passed, 1 skipped`).
-- Direct agent `/health`: returned `{"status":"ok","service":"agent"}`.
-- Direct agent `/webhook/drift`: returned HTTP 200 with `investigation_id`, `drift_event_id=drift-test-001`, `severity=critical`, `recommended_action=retrain`, `status=open`.
-- Platform `/health`: returned `{"status":"ok"}`.
-- Platform `/drift/report`: returned a drift report plus `"webhook_sent":false`.
-- Webhook delivery: platform attempted delivery, agent received `POST /webhook/drift`, and agent returned `422 Unprocessable Entity` because the payload shape did not match `DriftAlert`.
-
-### Contract Check
-- webhook contract compatibility: no
-- severity compatibility: yes
-- required field compatibility: no
-
-### Queue Check
-- agent queue: `ops_jobs`
-- worker queue: `drift-triage-jobs`
-- queue compatibility: no
-- idempotency compatibility: no
-
-### Blockers
-- Platform emits `DriftReport`-shaped webhook payloads, not the agent `DriftAlert` schema.
-- Agent `DriftAlert` uses `extra="forbid"`, so live platform payloads fail validation.
-- `uv` is installed but not on PATH in this shell.
-- `uv sync` cannot download Python in this environment.
-- Agent dispatch queue contract and worker consumer contract are misaligned.
-
-### Next Safe Task
-fix webhook contract mismatch
-
----
-
 ## 2026-05-05 - Jad / Codex
 
 ### Goal
-Fixed the platform -> agent webhook payload contract and aligned the agent/worker queue contract.
+Implemented HIL HTTP routes for pending approvals and approve/reject actions.
+
+### Branch
+feature/agent-hil-routes
 
 ### Files Changed
-- `contracts/webhook_v1.json`
-- `platform/app/config/settings.py`
-- `platform/app/routers/drift.py`
-- `platform/tests/test_api.py`
-- `platform/tests/test_drift.py`
-- `agent/app/tools/queue_client.py`
-- `agent/app/tools/dispatch_replay.py`
-- `agent/app/tools/dispatch_retrain.py`
-- `agent/app/tools/dispatch_rollback.py`
-- `agent/tests/test_dispatch_tools.py`
-- `worker/app/worker/consume_queue.py`
+- `agent/app/routers/hil.py`
+- `agent/app/routers/__init__.py`
+- `agent/app/main.py`
+- `agent/tests/test_hil_routes.py`
 - `sync_logs/jad/LOG.md`
 
 ### Commands Run
-- `Get-Content contracts/webhook_v1.json`
-- `Get-Content contracts/promote_v1.json`
-- `Get-Content agent/app/schemas/drift_alert.py`
-- `Get-Content platform/app/schemas/drift_report.py`
-- `Get-Content platform/app/routers/drift.py`
-- `Get-Content agent/app/tools/queue_client.py`
-- `Get-Content agent/app/tools/dispatch_replay.py`
-- `Get-Content agent/app/tools/dispatch_retrain.py`
-- `Get-Content agent/app/tools/dispatch_rollback.py`
-- `Get-Content worker/app/worker/consume_queue.py`
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout -b feature/agent-hil-routes`
+- `git merge feature/agent-webhook-graph-skeleton`
+- `Get-Content agent/app/main.py`
+- `Get-Content agent/app/routers/hil.py`
+- `Get-Content agent/app/routers/__init__.py`
+- `Get-Content agent/app/schemas/hil_action.py`
+- `Get-Content agent/app/services/request_approval.py`
+- `Get-Content agent/tests/test_request_approval.py`
 - `python -m unittest discover -s agent/tests -p "test_*.py"`
-- `Set-Location platform; & C:\Users\Jad\.local\bin\uv.exe run pytest tests/ -v`
-- `Set-Location platform; $env:PYTHONPATH=(Resolve-Path '.\.venv\Lib\site-packages').Path; & 'C:\Users\Jad\AppData\Local\Temp\uv-python\cpython-3.12.13-windows-x86_64-none\python.exe' -m pytest tests -v -p no:cacheprovider`
-- local live smoke: started agent and platform locally, then called `GET /drift/report`
+- `python -c "from agent.app.main import app; print([r.path for r in app.routes])"`
 
-### Tests
-- Agent tests: passed (`Ran 28 tests`, `OK`).
-- Platform tests: `uv run` failed because local uv cache initialization is blocked in `AppData`; fallback platform test run passed (`21 passed, 1 skipped`).
-- Live platform -> agent smoke: passed; `/drift/report` returned `"webhook_sent": true` and agent logged `POST /webhook/drift ... 200 OK`.
+### Results
+- Agent tests passed: `Ran 35 tests in 0.533s`, `OK`.
+- Import smoke passed and exposed the expected route list:
+  - `/webhook/drift`
+  - `/hil/pending`
+  - `/hil/{approval_id}`
+  - `/hil/{approval_id}/approve`
+  - `/hil/{approval_id}/reject`
+  - `/health`
 
-### Webhook Contract Fix Result
-- Platform now converts `DriftReport` to a DriftAlert-compatible webhook payload before POSTing to the agent.
-- `contracts/webhook_v1.json` now matches the agent DriftAlert shape.
-- Platform tests include:
-  - emitted payload validates against `agent.app.schemas.drift_alert.DriftAlert`
-  - `/drift/report` returns `webhook_sent=true` when mock agent returns `200`
-  - `/drift/report` returns `webhook_sent=false` with a useful error when mock agent returns `422`
+### Integration Enabled
+- Dashboard can now list pending HIL approvals.
+- Human can approve/reject through agent HTTP API.
+- Approval state uses existing Postgres persistence service.
+- No Production change happens inside the HIL route itself.
 
-### Queue Contract Fix Result
-- Agent queue name now matches worker: `drift-triage-jobs`
-- Agent payload now uses top-level `action` and top-level job fields instead of nested `payload`
-- Shared idempotency format is now `idempotency:{action}:{investigation_id}:{target_or_event}`
-- Worker accepts the canonical `replay_test` action and still normalizes legacy `replay`
-- Agent tests verify a worker-parsed agent-created payload
+### Assumptions
+- Production-impacting actions will later require an approved HILAction.
+- HIL route only changes approval status.
+- Worker/platform promotion is triggered later by graph/tool logic.
 
-### Remaining Blockers
-- `uv` is installed locally but not on PATH in this shell.
-- `uv run` is blocked locally by uv cache/AppData permissions, so platform tests still need the Python 3.12 fallback on this machine.
-- Old temporary integration logs under `reports/` are still untracked local artifacts.
+### Decisions Made
+- Invalid approval transitions return 409.
+- Missing approvals return 404.
+- HIL route does not directly promote or rollback models.
+
+### Do Not Touch
+- HILAction schema without coordination.
+- hil_approvals database schema without coordination.
+- approve/reject route paths without coordination.
+
+### Next Safe Task
+Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
