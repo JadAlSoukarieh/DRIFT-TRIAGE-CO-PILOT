@@ -354,3 +354,63 @@ Jad can generate model.joblib from a clean clone with:
 cp initial-training/dataset/bank-additional-full.csv platform/data/
 cd platform && uv run python -m app.services.run_training
 ```
+
+---
+
+## 2026-05-06 — Hadi / OpenCode (Session 9)
+
+### Goal
+Close remaining platform/worker gaps: queue visibility, replay handler, rollback safety, registry status, promotion audit.
+
+### Branch
+main (working directly, no feature branch)
+
+### Files Changed
+- platform/app/config/settings.py (added redis_url field)
+- platform/app/routers/queue.py (NEW — GET /queue/status)
+- platform/app/routers/registry.py (GET /status, approval_id validation, promotion audit)
+- platform/app/main.py (mount /queue router)
+- worker/app/worker/consume_queue.py (handle_replay real impl, handle_rollback approval_id gate)
+- worker/app/worker/test_handlers.py (NEW — worker handler tests)
+- platform/tests/test_api.py (+3 tests: queue_status, registry_status, promote_requires_approved_by)
+- postgres/init.sql (promotion_audit table)
+- sync_logs/hadi/LOG.md
+
+### Commands Run
+- `uv run pytest tests/ -v` — 23 passed, 2 skipped
+- `docker compose config` — passed
+
+### Endpoints Added
+| Endpoint | Method | Returns |
+|---|---|---|
+| /queue/status | GET | queue_length, dlq_length, redis_connected |
+| /registry/status | GET | registered_model_name, production_version, candidate_version |
+
+### Worker Handlers
+| Handler | Behavior |
+|---|---|
+| handle_retrain | Unchanged — runs run_training_pipeline() ✅ |
+| handle_replay | Loads model, runs 100 rows, computes avg score |
+| handle_rollback | Refuses without approval_id, pushes to DLQ with reason ✅ |
+
+### Tests Added
+| Test | Result |
+|---|---|
+| test_queue_status_redis_failure | PASSED |
+| test_registry_status_ok | SKIPPED (MLflow offline) |
+| test_promote_requires_approved_by | PASSED |
+| test_handle_rollback_refuses_without_approval | Defined in worker subpackage |
+
+### Registry/Promotion Audit
+- promotion_audit table added to postgres/init.sql (id, model_uri, investigation_id, approved_by, timestamp)
+- Promotion logged via structlog on successful promote
+- Production alias set on promote pass
+
+### Remaining Limitations
+- Rollback: handler accepts approved jobs but pushes to DLQ with "not implemented" — requires manual registry intervention
+- Replay: uses hardcoded fallback rows if dataset_path not in job payload
+- Registry status: skipped when MLflow server is down
+- No Postgres audit write for promotions yet (logged to structlog only)
+
+### Next Safe Task
+Commit + push. Ready for submission.

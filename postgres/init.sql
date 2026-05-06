@@ -38,3 +38,16 @@ CREATE INDEX IF NOT EXISTS idx_investigations_status
 
 CREATE INDEX IF NOT EXISTS idx_investigations_drift_event_id
     ON investigations (drift_event_id);
+
+CREATE TABLE IF NOT EXISTS promotion_audit (
+    id SERIAL PRIMARY KEY,
+    model_uri TEXT NOT NULL,
+    investigation_id TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    from_alias TEXT NULL,
+    to_alias TEXT NOT NULL DEFAULT 'Production'
+);
+
+CREATE INDEX IF NOT EXISTS idx_promotion_audit_model_uri
+    ON promotion_audit (model_uri);
