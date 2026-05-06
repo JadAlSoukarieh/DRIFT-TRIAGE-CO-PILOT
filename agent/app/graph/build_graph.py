@@ -1,4 +1,9 @@
-"""LangGraph StateGraph runner for webhook investigations."""
+"""LangGraph StateGraph runner for webhook investigations.
+
+Supervisor topology — not a chain.
+The supervisor routes conditionally between triage, action, execute_action, and comms
+based on the current AgentState.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,7 @@ from agent.app.config.settings import get_settings
 from agent.app.graph.run_action import run_action
 from agent.app.graph.run_comms import run_comms
 from agent.app.graph.run_execute_action import run_execute_action
+from agent.app.graph.run_supervisor import supervisor_node
 from agent.app.graph.run_triage import run_triage
 from agent.app.graph.state import AgentState
 from agent.app.schemas.drift_alert import DriftAlert
@@ -68,19 +74,43 @@ def configure_langsmith_environment() -> None:
 
 
 def build_agent_graph():
-    """Build the agent's deterministic LangGraph wrapper."""
+    """Build a LangGraph StateGraph with supervisor topology.
+
+    Flow: START → supervisor → (triage → supervisor → action → supervisor
+    → execute_action → supervisor → comms → supervisor → END)
+
+    The supervisor reads AgentState and routes to the next node conditionally.
+    Each sub-agent returns to the supervisor after completion.
+    """
 
     configure_langsmith_environment()
     graph = StateGraph(AgentState)
+
+    graph.add_node("supervisor", supervisor_node)
     graph.add_node("triage", run_triage)
     graph.add_node("action", run_action)
     graph.add_node("execute_action", run_execute_action)
     graph.add_node("comms", run_comms)
-    graph.add_edge(START, "triage")
-    graph.add_edge("triage", "action")
-    graph.add_edge("action", "execute_action")
-    graph.add_edge("execute_action", "comms")
-    graph.add_edge("comms", END)
+
+    graph.add_edge(START, "supervisor")
+
+    graph.add_conditional_edges(
+        "supervisor",
+        lambda state: state.get("next_node", END),
+        {
+            "triage": "triage",
+            "action": "action",
+            "execute_action": "execute_action",
+            "comms": "comms",
+            END: END,
+        },
+    )
+
+    graph.add_edge("triage", "supervisor")
+    graph.add_edge("action", "supervisor")
+    graph.add_edge("execute_action", "supervisor")
+    graph.add_edge("comms", "supervisor")
+
     return graph.compile()
 
 
