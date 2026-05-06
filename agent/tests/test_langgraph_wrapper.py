@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from unittest import IsolatedAsyncioTestCase
+import os
 from unittest.mock import AsyncMock, patch
 
-from agent.app.graph.build_graph import build_agent_graph, run_investigation
+from agent.app.config.settings import AgentSettings, get_settings
+from agent.app.graph.build_graph import (
+    build_agent_graph,
+    configure_langsmith_environment,
+    run_investigation,
+)
 from agent.app.schemas.drift_alert import DriftAlert
 
 
@@ -42,8 +48,59 @@ def sample_alert(*, severity: str) -> DriftAlert:
     )
 
 
+def build_settings(**overrides) -> AgentSettings:
+    values = {
+        "POSTGRES_DSN": "postgresql://user:pass@localhost:5432/drift",
+        "REDIS_URL": "redis://localhost:6379/0",
+        "PLATFORM_BASE_URL": "http://localhost:8000",
+        "LLM_PROVIDER": "mock",
+        "LANGSMITH_TRACING": "false",
+        "LANGSMITH_ENDPOINT": "https://api.smith.langchain.com",
+        "LANGSMITH_API_KEY": None,
+        "LANGSMITH_PROJECT": "drift-triage-copilot",
+        "LANGGRAPH_API_KEY": None,
+    }
+    values.update(overrides)
+    return AgentSettings(**values)
+
+
 class LangGraphWrapperTests(IsolatedAsyncioTestCase):
     """Validate graph compilation and deterministic behavior in mock mode."""
+
+    def setUp(self) -> None:
+        self._env_patcher = patch.dict(
+            os.environ,
+            {
+                "LLM_PROVIDER": "mock",
+                "LANGSMITH_TRACING": "false",
+            },
+            clear=False,
+        )
+        self._env_patcher.start()
+        get_settings.cache_clear()
+
+    def tearDown(self) -> None:
+        self._env_patcher.stop()
+        get_settings.cache_clear()
+
+    def test_configure_langsmith_environment_bridges_settings_to_env(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "agent.app.graph.build_graph.get_settings",
+            return_value=build_settings(
+                LANGSMITH_TRACING="true",
+                LANGSMITH_API_KEY="test-key",
+                LANGSMITH_PROJECT="test-project",
+                LANGGRAPH_API_KEY="test-langgraph-key",
+            ),
+        ):
+            configure_langsmith_environment()
+
+            self.assertEqual(os.environ["LANGSMITH_TRACING"], "true")
+            self.assertEqual(os.environ["LANGCHAIN_TRACING_V2"], "true")
+            self.assertEqual(os.environ["LANGSMITH_PROJECT"], "test-project")
+            self.assertEqual(os.environ["LANGCHAIN_PROJECT"], "test-project")
+            self.assertIn("LANGSMITH_API_KEY", os.environ)
+            self.assertIn("LANGGRAPH_API_KEY", os.environ)
 
     def test_build_agent_graph_returns_invokable_graph(self) -> None:
         graph = build_agent_graph()
