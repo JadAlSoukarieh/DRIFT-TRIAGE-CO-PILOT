@@ -667,6 +667,136 @@ feature/agent-hil-routes
 ### Next Safe Task
 Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
 
+## 2026-05-06 — Jad / Codex
+
+### Goal
+Added real LangGraph StateGraph wrapper and optional Azure/Kimi LLM adapter while preserving mock deterministic mode.
+
+### Branch
+feature/langgraph-llm-wrapper
+
+### Files Changed
+- `.env.example`
+- `agent/app/config/settings.py`
+- `agent/app/graph/__init__.py`
+- `agent/app/graph/build_graph.py`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/run_triage.py`
+- `agent/app/llm/__init__.py`
+- `agent/app/llm/client.py`
+- `agent/app/llm/smoke_test.py`
+- `agent/pyproject.toml`
+- `agent/tests/test_langgraph_wrapper.py`
+- `agent/tests/test_llm_client.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -m py_compile agent/app/llm/client.py agent/app/llm/smoke_test.py`
+- `$env:LLM_PROVIDER='mock'; python -m agent.app.llm.smoke_test`
+- `$env:LLM_PROVIDER='azure'; python -m agent.app.llm.smoke_test`
+- `git status --short`
+
+### Results
+- Agent tests: passed, 53 tests OK.
+- LLM mock smoke: passed.
+- Optional Azure smoke: passed with local `.env` credentials; no secrets printed.
+- LangGraph wrapper: compiled and invoked by tests.
+
+### Integration Enabled
+- Agent graph now uses LangGraph StateGraph.
+- Existing deterministic behavior remains as fallback.
+- `LLM_PROVIDER=mock` works without API keys.
+- Azure/Kimi config is supported through env vars.
+- OpenAI-compatible Azure `/openai/v1` endpoints are supported.
+- No Production action can be triggered directly by LLM output.
+
+### Assumptions
+- `AZURE_STRONG_MODEL=Kimi-K2.6-1`
+- Real API keys live only in `.env` or local environment.
+- LLM calls are optional for demo.
+- Deterministic logic remains the safety baseline.
+
+### Decisions Made
+- Mock mode remains the default.
+- Azure config errors are raised only when an LLM call is attempted.
+- Azure smoke output is sanitized and does not print secrets.
+- Endpoint normalization handles the common duplicated `AZURE_OPENAI_ENDPOINT=` prefix.
+
+### Do Not Touch
+- API keys/secrets
+- Production action rules
+- webhook response schema
+- queue contract
+
+### Next Safe Task
+Run full local demo smoke, then Docker Compose hardening.
+
+---
+
+## 2026-05-06 - Jad / Codex
+
+### Goal
+Added real LangGraph StateGraph wrapper and optional Azure/Kimi LLM adapter while preserving mock deterministic mode.
+
+### Branch
+feature/langgraph-llm-wrapper
+
+### Files Changed
+- `.env.example`
+- `agent/pyproject.toml`
+- `agent/app/config/settings.py`
+- `agent/app/graph/__init__.py`
+- `agent/app/graph/build_graph.py`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/run_triage.py`
+- `agent/app/llm/__init__.py`
+- `agent/app/llm/client.py`
+- `agent/app/llm/smoke_test.py`
+- `agent/tests/test_langgraph_wrapper.py`
+- `agent/tests/test_llm_client.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout feature/langgraph-llm-wrapper`
+- `git merge main`
+- `python -m pip install --user "langgraph>=0.2,<1"`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -m py_compile agent/app/llm/client.py agent/app/llm/smoke_test.py`
+- `python -m agent.app.llm.smoke_test`
+
+### Results
+- Agent tests: passed, `Ran 51 tests`, `OK`.
+- LLM mock smoke: passed.
+- Optional Azure smoke: skipped because Azure env vars are not set in this terminal.
+- LangSmith/LangGraph tracing placeholders added without storing real keys.
+
+### Integration Enabled
+- Agent graph now uses LangGraph StateGraph.
+- Existing deterministic behavior remains as fallback.
+- `LLM_PROVIDER=mock` works without API keys.
+- Azure/Kimi config is supported through env vars.
+- LangSmith/LangGraph tracing config is accepted through env vars.
+- No Production action can be triggered directly by LLM output.
+
+### Assumptions
+- `AZURE_STRONG_MODEL=Kimi-K2.6-1`
+- Real API keys live only in `.env` or local environment.
+- LLM calls are optional for demo.
+- Deterministic logic remains the safety baseline.
+
+### Do Not Touch
+- API keys/secrets
+- Production action rules
+- webhook response schema
+- queue contract
+
+### Next Safe Task
+Run optional Azure LLM smoke locally, then Docker Compose hardening.
+
 ---
 
 ## 2026-05-05 - Jad / Codex
