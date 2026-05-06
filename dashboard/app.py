@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from html import escape
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -295,6 +296,7 @@ def session_defaults() -> None:
     """Initialize state keys used to persist action feedback across reruns."""
 
     st.session_state.setdefault("last_drift_result", None)
+    st.session_state.setdefault("last_agent_alert_result", None)
     st.session_state.setdefault("last_action_message", None)
 
 
@@ -414,10 +416,61 @@ def drift_kpi(result: dict[str, Any] | None) -> tuple[str, str, str, str]:
     report = data.get("report") if isinstance(data.get("report"), dict) else {}
     severity = str(report.get("severity", "unknown"))
     webhook_sent = data.get("webhook_sent")
+    webhook_response = data.get("webhook_response")
+    action = (
+        webhook_response.get("recommended_action")
+        if isinstance(webhook_response, dict)
+        else None
+    )
     label = "success" if webhook_sent else "warning"
     tone = "green" if webhook_sent else "amber"
     detail = f"Severity: {severity}. Webhook sent: {webhook_sent}."
+    if action:
+        detail = f"{detail} Agent action: {action}."
     return severity.title(), label, tone, detail
+
+
+def build_demo_alert(severity: str) -> dict[str, Any]:
+    """Create a synthetic DriftAlert payload for live demo testing."""
+
+    now = datetime.now(timezone.utc)
+    event_id = f"dashboard-demo-{severity}-{now.strftime('%Y%m%dT%H%M%SZ')}"
+    psi = {"stable": 0.03, "moderate": 0.14, "critical": 0.31}[severity]
+    output_psi = {"stable": 0.02, "moderate": 0.12, "critical": 0.18}[severity]
+    return {
+        "schema_version": "v1",
+        "event_id": event_id,
+        "created_at": now.isoformat(),
+        "model_name": "bank_marketing_pipeline",
+        "model_version": "1",
+        "model_alias": "candidate",
+        "severity": severity,
+        "window": {
+            "size": 200,
+            "start": None,
+            "end": now.isoformat(),
+        },
+        "numeric_drift": [
+            {
+                "feature": "euribor3m",
+                "psi": psi,
+                "severity": severity,
+            }
+        ],
+        "categorical_drift": [
+            {
+                "feature": "job",
+                "p_value": 0.01 if severity == "critical" else 0.18,
+                "severity": "moderate" if severity != "stable" else "stable",
+            }
+        ],
+        "output_drift": {
+            "psi": output_psi,
+            "positive_rate_reference": 0.11,
+            "positive_rate_current": 0.22 if severity == "critical" else 0.16,
+            "severity": severity,
+        },
+    }
 
 
 def render_dashboard() -> None:
@@ -530,10 +583,64 @@ def render_dashboard() -> None:
                 data = last_drift_result.get("data")
                 report = data.get("report", {}) if isinstance(data, dict) else {}
                 webhook_sent = data.get("webhook_sent") if isinstance(data, dict) else None
+                webhook_response = data.get("webhook_response") if isinstance(data, dict) else None
                 st.success(f"Drift report completed. Webhook sent: {webhook_sent}.")
                 st.caption(f"Severity: {report.get('severity', 'unknown')}")
+                if isinstance(webhook_response, dict):
+                    investigation_id = webhook_response.get("investigation_id", "unknown")
+                    recommended_action = webhook_response.get("recommended_action", "unknown")
+                    status = webhook_response.get("status", "unknown")
+                    summary = webhook_response.get("summary", "No summary returned.")
+                    st.markdown(
+                        f"""
+                        <div class="panel-card">
+                            <strong>Agent investigation</strong>
+                            <div class="muted">Investigation: {escape(str(investigation_id))}</div>
+                            <div class="muted">Status: {escape(str(status))}</div>
+                            <div class="muted">Recommended action: {escape(str(recommended_action))}</div>
+                            <div class="muted">{escape(str(summary))}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
             else:
                 st.error(f"Drift report failed: {last_drift_result.get('error')}")
+
+        st.markdown(
+            """
+            <div class="panel-card">
+                <strong>Demo drift alert</strong>
+                <div class="muted">Send a synthetic alert directly to the agent to test replay/retrain behavior.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        demo_severity = st.selectbox(
+            "Demo severity",
+            options=["stable", "moderate", "critical"],
+            index=1,
+            key="demo_drift_severity",
+        )
+        if st.button("Send Demo Alert", key="send_demo_alert", use_container_width=True):
+            st.session_state["last_agent_alert_result"] = post_json(
+                f"{AGENT_BASE_URL}/webhook/drift",
+                build_demo_alert(demo_severity),
+                timeout=10,
+            )
+            st.rerun()
+
+        last_agent_alert_result = st.session_state["last_agent_alert_result"]
+        if last_agent_alert_result:
+            if last_agent_alert_result.get("ok"):
+                alert_data = last_agent_alert_result.get("data")
+                action = alert_data.get("recommended_action") if isinstance(alert_data, dict) else "unknown"
+                status = alert_data.get("status") if isinstance(alert_data, dict) else "unknown"
+                job_id = alert_data.get("job_id") if isinstance(alert_data, dict) else None
+                st.success(f"Agent alert handled. Action: {action}. Status: {status}.")
+                if job_id:
+                    st.caption(f"Queued job: {job_id}")
+            else:
+                st.error(f"Demo alert failed: {last_agent_alert_result.get('error')}")
 
         if st.button("Refresh approvals", key="refresh_approvals", use_container_width=True):
             st.session_state["last_action_message"] = {
@@ -556,6 +663,8 @@ def render_dashboard() -> None:
         st.json(approvals_result)
     with st.expander("Raw drift report response"):
         st.json(st.session_state["last_drift_result"] or {"ok": False, "data": None, "error": "No drift report run yet."})
+    with st.expander("Raw demo alert response"):
+        st.json(st.session_state["last_agent_alert_result"] or {"ok": False, "data": None, "error": "No demo alert sent yet."})
     with st.expander("Health check details"):
         st.json({"platform": platform_health, "agent": agent_health})
 
