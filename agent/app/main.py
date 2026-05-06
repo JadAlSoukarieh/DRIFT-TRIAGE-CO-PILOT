@@ -1,14 +1,21 @@
-# agent/app/main.py
-"""FastAPI application assembly for the LangGraph agent.
+"""Minimal FastAPI app for the deterministic drift agent."""
 
-Lifespan:
-- Initialize AsyncPostgresSaver from POSTGRES_DSN env var
-- Compile LangGraph StateGraph with checkpointer
-- Store graph in app.state.graph for per-request invocation
+from __future__ import annotations
 
-Routers mounted:
-- /webhook/drift  → routers/webhook.py
-- /webhook/       → routers/hil.py (approve/reject)
+from fastapi import FastAPI
 
-TODO: Implement lifespan, mount routers.
-"""
+from agent.app.routers import webhook
+
+
+app = FastAPI(title="Drift Triage Co-Pilot Agent", version="0.1.0")
+app.include_router(webhook.router)
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    """Basic liveness endpoint."""
+
+    return {
+        "status": "ok",
+        "service": "agent",
+    }

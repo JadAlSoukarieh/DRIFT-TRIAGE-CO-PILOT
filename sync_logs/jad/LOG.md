@@ -515,3 +515,88 @@ main
 
 ### Next Safe Task
 fix MLflow local temp handling or Docker build context, depending whether the next goal is training reproducibility or containerized smoke
+
+---
+
+## 2026-05-05 - Jad / Codex
+
+### Goal
+Implemented minimal agent `/webhook/drift` receiver and deterministic graph skeleton.
+
+### Branch
+feature/agent-webhook-graph-skeleton
+
+### Files Changed
+- `agent/app/graph/__init__.py`
+- `agent/app/graph/state.py`
+- `agent/app/graph/run_triage.py`
+- `agent/app/graph/run_action.py`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/build_graph.py`
+- `agent/app/routers/__init__.py`
+- `agent/app/routers/webhook.py`
+- `agent/app/main.py`
+- `agent/tests/test_webhook.py`
+- `agent/pyproject.toml`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status --short`
+- `git branch --show-current`
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout -b feature/agent-webhook-graph-skeleton`
+- `Get-ChildItem agent -File -Recurse -Depth 5`
+- `Get-Content agent/app/schemas/drift_alert.py`
+- `Get-Content agent/app/schemas/investigation.py`
+- `Get-Content agent/app/schemas/hil_action.py`
+- `Get-Content agent/app/main.py`
+- `Get-Content agent/app/routers/webhook.py`
+- `Get-Content agent/app/graph/build_graph.py`
+- `Get-Content agent/app/graph/run_triage.py`
+- `Get-Content agent/app/graph/run_action.py`
+- `Get-Content agent/app/graph/run_comms.py`
+- `Get-Content agent/tests/test_agent_schemas.py`
+- `Get-Content agent/tests/test_dispatch_tools.py`
+- `Get-Content agent/tests/test_request_approval.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print(app.title)"`
+- `python -m pip install --user fastapi httpx`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print(app.title)"`
+
+### Results
+- Initial test run failed because `fastapi` was not installed in the requested Python interpreter.
+- Added `fastapi` and `httpx` to `agent/pyproject.toml`.
+- Installed missing runtime dependency locally with `python -m pip install --user fastapi httpx`.
+- Agent tests passed: `Ran 27 tests in 0.444s`, `OK`.
+- Import smoke passed: `Drift Triage Co-Pilot Agent`.
+
+### Integration Enabled
+- Platform can now POST drift alerts to `/webhook/drift`.
+- Agent returns `investigation_id`, `severity`, `recommended_action`, and `summary`.
+- No real LLM required.
+- No Redis required.
+- No Postgres required at startup.
+- No Production action occurs.
+
+### Assumptions
+- Stable drift -> `none`.
+- Moderate drift -> `replay_test`.
+- Critical drift -> `retrain` candidate.
+- Production-impacting actions will require HIL later.
+
+### Decisions Made
+- Minimal graph is deterministic for testability.
+- LLM integration comes later.
+- HIL approval is not triggered for `replay_test` or `retrain` in this phase.
+- Webhook path is `/webhook/drift`.
+
+### Do Not Touch
+- `DriftAlert` schema without coordination.
+- Webhook route path without coordination.
+- `RecommendedAction` enum without coordination.
+
+### Next Safe Task
+Run platform -> agent webhook integration test, then wire optional Redis dispatch or implement HIL HTTP routes.
