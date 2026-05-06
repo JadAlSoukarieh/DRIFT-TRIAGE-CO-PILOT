@@ -29,6 +29,13 @@ try:
 except ImportError:  # pragma: no cover - local test environments may omit redis
     aioredis = None
 
+# In Docker, PYTHONPATH=/app makes the platform package importable.
+# For local testing: PYTHONPATH=.. uv run python -m worker_app.worker.consume_queue
+try:
+    from app.services.run_training import run_training_pipeline
+except ImportError:
+    run_training_pipeline = None  # type: ignore[assignment]
+
 try:
     import structlog
 except ImportError:  # pragma: no cover - local test environments may omit structlog
@@ -100,8 +107,8 @@ def build_idempotency_key(action: str, investigation_id: str, target_or_event: s
 
 
 async def handle_retrain(job: dict[str, Any]) -> None:
-    sys.path.insert(0, _platform_path())
-    from app.services.run_training import run_training_pipeline
+    if run_training_pipeline is None:
+        raise RuntimeError("run_training_pipeline is not available in this environment.")
 
     loop = asyncio.get_running_loop()
     model_uri = await loop.run_in_executor(
@@ -113,11 +120,64 @@ async def handle_retrain(job: dict[str, Any]) -> None:
 
 
 async def handle_replay(job: dict[str, Any]) -> None:
-    logger.info("replay_stub", investigation_id=job.get("investigation_id"))
+    investigation_id = job.get("investigation_id", "unknown")
+    try:
+        import joblib
+        import pandas as pd
+        import numpy as np
+
+        model = joblib.load("data/model.joblib")
+        dataset_path = job.get("dataset_path")
+        if dataset_path:
+            df = pd.read_csv(dataset_path, sep=";").head(100)
+        else:
+            df = pd.DataFrame([{
+                "age": 40, "job": "admin.", "marital": "married",
+                "education": "university.degree", "default": "no",
+                "housing": "yes", "loan": "no", "contact": "cellular",
+                "month": "may", "day_of_week": "mon", "campaign": 1,
+                "pdays": 999, "previous": 0, "poutcome": "nonexistent",
+                "emp.var.rate": 1.1, "cons.price.idx": 93.994,
+                "cons.conf.idx": -36.4, "euribor3m": 4.857,
+                "nr.employed": 5191, "y": "no",
+            }])
+        df.drop(columns=["y", "duration"], inplace=True, errors="ignore")
+        df["pdays_never_contacted"] = (df["pdays"] == 999).astype(int)
+        proba = model.predict_proba(df)[:, 1]
+        rows_checked = len(proba)
+        avg_score = float(np.mean(proba))
+        logger.info(
+            "replay_complete",
+            investigation_id=investigation_id,
+            rows_checked=rows_checked,
+            avg_score=round(avg_score, 4),
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Replay failed: {exc}") from exc
 
 
 async def handle_rollback(job: dict[str, Any]) -> None:
-    logger.info("rollback_stub", investigation_id=job.get("investigation_id"))
+    investigation_id = job.get("investigation_id", "unknown")
+    approval_id = job.get("approval_id") or job.get("hil_approval_id")
+
+    if not approval_id:
+        raise RuntimeError(
+            f"Rollback refused: no approval_id provided. "
+            f"investigation_id={investigation_id}. "
+            "Rollback requires HIL approval before execution."
+        )
+
+    logger.info(
+        "rollback_stub",
+        investigation_id=investigation_id,
+        approval_id=approval_id,
+        note="Rollback handler is approved but not yet fully implemented. "
+             "Pushing to DLQ with structured reason.",
+    )
+    raise RuntimeError(
+        f"Rollback approved (approval_id={approval_id}) but handler not implemented. "
+        "Manual registry intervention required."
+    )
 
 
 HANDLERS = {

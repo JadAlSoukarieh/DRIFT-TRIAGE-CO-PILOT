@@ -12,6 +12,7 @@ dist/
 mlruns/
 *.joblib
 *.nbconvert.ipynb
+*.log
 
 #environment variables
 .env

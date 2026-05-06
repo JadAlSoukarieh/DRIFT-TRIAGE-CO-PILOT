@@ -68,6 +68,8 @@ def test_openapi_schema(test_client):
     assert "/predict/" in schema["paths"]
     assert "/drift/report" in schema["paths"]
     assert "/registry/promote" in schema["paths"]
+    assert "/registry/status" in schema["paths"]
+    assert "/queue/status" in schema["paths"]
 
 
 def test_drift_report_endpoint(test_client):
@@ -91,9 +93,11 @@ def test_drift_report_endpoint(test_client):
     assert "report" in data
     assert "webhook_sent" in data
     assert "webhook_error" in data
+    assert "webhook_response" in data
     assert data["report"]["severity"] == "stable"
     assert data["webhook_sent"] is True
     assert data["webhook_error"] is None
+    assert data["webhook_response"] == {"ok": True}
 
 
 def test_drift_report_endpoint_webhook_failure_sets_error(test_client):
@@ -116,3 +120,48 @@ def test_drift_report_endpoint_webhook_failure_sets_error(test_client):
     data = response.json()
     assert data["webhook_sent"] is False
     assert "422" in data["webhook_error"]
+    assert data["webhook_response"] is None
+
+
+def test_queue_status_redis_failure(test_client):
+    """GET /queue/status returns safe response when Redis is unavailable."""
+    response = test_client.get("/queue/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["redis_connected"] is False
+    assert data["queue_length"] is None
+    assert data["dlq_length"] is None
+    assert "Redis unavailable" in data["worker_note"]
+
+
+def test_registry_status_ok(test_client):
+    """GET /registry/status returns model name and version info."""
+    import pytest
+    import socket
+    s = socket.socket()
+    try:
+        s.settimeout(1)
+        s.connect(("localhost", 5000))
+        s.close()
+    except Exception:
+        s.close()
+        pytest.skip("MLflow server not running — skipping registry status test")
+    response = test_client.get("/registry/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert "registered_model_name" in data
+    assert data["registered_model_name"] == "bank_marketing_pipeline"
+    assert "status" in data
+
+
+def test_promote_requires_approved_by(test_client):
+    """POST /registry/promote rejects requests with empty approved_by."""
+    payload = {
+        "model_uri": "models:/bank_marketing_pipeline@candidate",
+        "approved_by": "",
+        "investigation_id": "test-inv-1",
+        "timestamp": "2026-05-06T12:00:00Z",
+    }
+    response = test_client.post("/registry/promote", json=payload)
+    assert response.status_code == 422
+    assert "approved_by" in response.json()["detail"]

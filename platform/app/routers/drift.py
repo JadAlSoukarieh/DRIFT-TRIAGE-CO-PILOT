@@ -94,7 +94,7 @@ async def emit_webhook(
     report: DriftReport,
     client: httpx.AsyncClient,
     settings,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, dict | None]:
     """POST a DriftAlert-compatible payload to agent /webhook/drift."""
 
     payload = drift_report_to_alert(report, settings)
@@ -104,11 +104,20 @@ async def emit_webhook(
             json=payload,
             timeout=10.0,
         )
+        response_data = None
+        try:
+            response_data = response.json()
+        except ValueError:
+            response_data = None
         if response.status_code == 200:
-            return True, None
-        return False, f"agent returned {response.status_code}"
+            try:
+                body = response.json()
+            except ValueError:
+                body = {"message": "agent returned non-JSON success response"}
+            return True, None, body
+        return False, f"agent returned {response.status_code}", None
     except httpx.RequestError as exc:
-        return False, f"request error: {exc.__class__.__name__}"
+        return False, f"request error: {exc.__class__.__name__}", None
 
 
 @router.get("/report")
@@ -126,9 +135,10 @@ async def get_report(
         timestamp=datetime.now(timezone.utc),
     )
 
-    success, error = await emit_webhook(report, client, settings)
+    success, error, webhook_response = await emit_webhook(report, client, settings)
     return {
         "report": report.model_dump(mode="json"),
         "webhook_sent": success,
         "webhook_error": error,
+        "webhook_response": webhook_response,
     }

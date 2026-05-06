@@ -1,72 +1,23 @@
+name: drift-triage-copilot
+
 services:
-  platform:
-    build: ./platform
-    ports:
-      - "8000:8000"
-    env_file: .env
-    volumes:
-      - ./platform/data:/app/data
-    depends_on:
-      - mlflow
-    networks:
-      - drift-net
-
-  agent:
-    build: ./agent
-    ports:
-      - "8001:8001"
-    env_file: .env
-    depends_on:
-      - postgres
-      - redis
-    networks:
-      - drift-net
-
-  worker:
-    build: ./worker
-    env_file: .env
-    volumes:
-      - ./platform/data:/app/data
-    depends_on:
-      - platform
-      - redis
-      - mlflow
-    networks:
-      - drift-net
-
-  dashboard:
-    build: ./dashboard
-    ports:
-      - "8501:8501"
-    env_file: .env
-    depends_on:
-      - platform
-      - agent
-      - postgres
-      - redis
-    networks:
-      - drift-net
-
-  mlflow:
-    build: ./mlflow
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./platform/data:/data
-    networks:
-      - drift-net
-
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: pass
-      POSTGRES_DB: drift
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}
+      POSTGRES_DB: ${POSTGRES_DB:-drift}
     ports:
-      - "5432:5432"
+      - "55432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks:
       - drift-net
 
@@ -76,6 +27,126 @@ services:
       - "6379:6379"
     volumes:
       - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - drift-net
+
+  mlflow:
+    build:
+      context: ./mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./platform/data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - drift-net
+
+  platform:
+    build:
+      context: ./platform
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      AGENT_BASE_URL: ${AGENT_BASE_URL:-http://agent:8001}
+    volumes:
+      - ./platform/data:/app/data
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - drift-net
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgresql+asyncpg://user:pass@postgres:5432/drift}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      PLATFORM_BASE_URL: ${PLATFORM_BASE_URL:-http://platform:8000}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_MODEL: ${LLM_MODEL:-mock}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-10-21}
+      AZURE_STRONG_MODEL: ${AZURE_STRONG_MODEL:-Kimi-K2.6-1}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-Kimi-K2.6-1}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-drift-triage-copilot}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - drift-net
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+    volumes:
+      - ./platform/data:/app/platform/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      platform:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    networks:
+      - drift-net
+
+  dashboard:
+    build:
+      context: ./dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      PLATFORM_BASE_URL: ${DASHBOARD_PLATFORM_BASE_URL:-http://platform:8000}
+      AGENT_BASE_URL: ${DASHBOARD_AGENT_BASE_URL:-http://agent:8001}
+    depends_on:
+      platform:
+        condition: service_healthy
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - drift-net
 
