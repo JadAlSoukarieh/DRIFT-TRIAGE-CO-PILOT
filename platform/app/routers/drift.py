@@ -110,8 +110,12 @@ async def emit_webhook(
         except ValueError:
             response_data = None
         if response.status_code == 200:
-            return True, None, response_data
-        return False, f"agent returned {response.status_code}", response_data
+            try:
+                body = response.json()
+            except ValueError:
+                body = {"message": "agent returned non-JSON success response"}
+            return True, None, body
+        return False, f"agent returned {response.status_code}", None
     except httpx.RequestError as exc:
         return False, f"request error: {exc.__class__.__name__}", None
 

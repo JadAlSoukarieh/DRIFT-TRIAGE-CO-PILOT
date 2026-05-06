@@ -956,128 +956,89 @@ feature/agent-action-execution
 ### Next Safe Task
 Implement dashboard HIL inbox or run full platform -> agent -> Redis smoke test.
 
----
-
-## 2026-05-06 - Jad / Codex
+## 2026-05-06 — Jad / Codex
 
 ### Goal
-Verified latest main and implemented a polished Streamlit dashboard HIL Inbox and system status panel.
+Hardened Docker Compose full-stack startup and verified containerized service connectivity.
 
 ### Branch
-feature/dashboard-hil-inbox
+fix/docker-compose-full-stack
 
 ### Files Changed
+- `.dockerignore`
+- `.env.example`
+- `.gitignore`
+- `RUNBOOK.md`
+- `agent/Dockerfile`
+- `agent/app/services/manage_checkpoints.py`
+- `agent/app/services/request_approval.py`
+- `agent/pyproject.toml`
+- `dashboard/.dockerignore`
+- `dashboard/Dockerfile`
 - `dashboard/app.py`
 - `dashboard/pyproject.toml`
-- `dashboard/Dockerfile`
-- `dashboard/.dockerignore`
-- `sync_logs/jad/LOG.md`
+- `docker-compose.yml`
+- `mlflow/Dockerfile`
+- `platform/Dockerfile`
+- `platform/app/routers/drift.py`
+- `reports/docker_compose_full_stack_2026-05-06.md`
+- `worker/Dockerfile`
 
 ### Commands Run
-- `git status`
-- `git checkout main`
-- `git pull origin main`
-- `git log --oneline --decorate -5`
+- `docker compose config`
+- `docker compose build postgres`
+- `docker compose build redis`
+- `docker compose build mlflow`
+- `docker compose build platform`
+- `docker compose build agent`
+- `docker compose build worker`
+- `docker compose build dashboard`
+- `docker compose build`
+- `docker compose up -d postgres redis mlflow`
+- `docker compose ps`
+- `docker compose up -d platform agent worker dashboard`
+- `docker compose ps`
+- `Invoke-WebRequest http://127.0.0.1:8000/health`
+- `Invoke-WebRequest http://127.0.0.1:8001/health`
+- `Invoke-WebRequest http://127.0.0.1:8501`
+- `Invoke-WebRequest http://127.0.0.1:5000`
+- `Invoke-WebRequest http://127.0.0.1:8000/drift/report`
+- `Invoke-WebRequest http://127.0.0.1:8001/webhook/drift`
+- `docker compose exec redis redis-cli LLEN drift-triage-jobs`
+- `docker compose exec redis redis-cli LLEN DLQ:drift-triage-jobs`
+- `docker compose logs --tail=80 worker`
 - `python -m unittest discover -s agent/tests -p "test_*.py"`
 - `cd platform && uv run pytest tests/ -v`
-- `cd platform && C:\Users\Jad\.local\bin\uv.exe run pytest tests/ -v`
-- `cd platform && python -m pytest tests -v -p no:cacheprovider` using the local uv-managed Python fallback
-- `docker compose config` with sanitized pass/fail reporting only
-- `git checkout -b feature/dashboard-hil-inbox`
-- `python -m py_compile dashboard/app.py`
-- `python -m unittest discover -s agent/tests -p "test_*.py"`
-- `docker compose config` with sanitized pass/fail reporting only
 
 ### Results
-- Agent tests: passed, `Ran 42 tests`, `OK`.
-- Platform tests: `uv` is not on PATH, direct `uv.exe` failed to initialize its local cache due AppData permissions, fallback Python run passed with `21 passed, 1 skipped`.
-- Dashboard syntax/import: `python -m py_compile dashboard/app.py` passed.
-- Docker compose config: passed; raw output was not recorded because it expands local `.env` values.
+- docker compose config: passed
+- image builds: passed for `mlflow`, `platform`, `agent`, `worker`, `dashboard`; `postgres` and `redis` are image-only
+- service startup: passed
+- platform health: HTTP 200
+- agent health: HTTP 200
+- dashboard health: HTTP 200
+- mlflow health: HTTP 200
+- drift webhook: `webhook_sent=true`
+- Redis queue: final retrain test drained the queue back to `0`
+- worker consumption: successful retrain completion on the final critical job
 
-### Dashboard Features
-- Polished command-center layout
-- Service health cards
-- Drift smoke panel
-- HIL pending approvals inbox
-- Approve/reject actions
-- Queue placeholder
-- Debug expanders
-
-### UX / Design Decisions
-- modern wide layout
-- card-based approval inbox
-- status chips/badges
-- raw JSON hidden in expanders
-- strong hierarchy and spacing
-- clean color accents
-- action feedback stored in `st.session_state` before rerun
-- stable approval widget keys based on `approval_id`
+### Fixes Applied
+- Added Compose health checks and healthy dependency ordering.
+- Switched Docker service URLs to service-name networking.
+- Changed Postgres host port to `55432` for Windows compatibility.
+- Fixed agent and worker Docker build contexts and runtime module paths.
+- Added worker dataset fallback so retraining can run in-container.
+- Enabled MLflow `--allowed-hosts "*"` so worker retraining can register artifacts through the container network.
+- Replaced the placeholder dashboard with the working Streamlit HIL dashboard.
+- Documented the clean startup path in `RUNBOOK.md`.
 
 ### Blockers
-- `uv` is installed locally but not available on PATH in this shell.
-- Direct `uv.exe` is blocked by local AppData cache permissions.
-- Platform `.env` extra-key strictness remains a platform config risk if tests are run from a context that loads the repo-root `.env`; no platform code was changed in this branch.
+- Redis DLQ still contains historical failed retrain jobs from before the MLflow host-header fix.
+- `replay_test` and `rollback` worker handlers are still stubbed.
+- Bootstrap is still required only if `platform/data/model.joblib` is missing.
 
 ### Next Safe Task
-Run full local demo and then wire queue visibility / investigation history.
-
----
-
-## 2026-05-06 - Jad / Codex Full App Smoke
-
-### Goal
-Ran a full local app smoke test across dashboard, platform, agent, Redis dispatch, and HIL persistence.
-
-### Branch
-feature/dashboard-hil-inbox
-
-### Files Changed
-- `platform/app/routers/drift.py`
-- `platform/tests/test_api.py`
-- `dashboard/app.py`
-- `test_everything/run_full_local_smoke.ps1`
-- `test_everything/full_app_smoke_2026-05-06.md`
-- `sync_logs/jad/LOG.md`
-
-### Commands Run
-- `python -m py_compile dashboard/app.py`
-- `python -m unittest discover -s agent/tests -p "test_*.py"`
-- `platform` pytest with local fallback Python
-- `docker compose config` with sanitized output only
-- `docker compose up -d redis`
-- started isolated `drift-test-postgres` on host port `15432`
-- started agent on `127.0.0.1:8001`
-- started platform on `127.0.0.1:8000`
-- started dashboard on `127.0.0.1:8501`
-- called agent/platform health endpoints
-- called platform `/drift/report`
-- called agent `/webhook/drift` with moderate and critical payloads
-- inspected Redis `drift-triage-jobs`
-- created/listed/approved a HIL approval
-
-### Results
-- Dashboard: running at `http://127.0.0.1:8501`.
-- Agent: health passed.
-- Platform: health passed.
-- Platform `/drift/report`: webhook delivery passed and now returns agent `webhook_response`.
-- Moderate drift: enqueued `replay_test`.
-- Critical drift: enqueued `retrain`.
-- HIL pending/approve flow: passed against isolated test Postgres.
-- Agent tests: passed, `42 OK`.
-- Platform tests: passed, `21 passed, 1 skipped`.
-
-### Fixes Made
-- Platform drift report now exposes the agent webhook response so dashboard can show what happened after webhook delivery.
-- Dashboard now displays returned investigation id, status, recommended action, and summary after `Run Drift Report`.
-- Dashboard now includes a demo drift alert control for stable/moderate/critical agent behavior.
-- Added full local smoke script and report under `test_everything`.
-
-### Blockers / Notes
-- The machine has a local Windows Postgres on `127.0.0.1:5432`, so full local HIL testing uses isolated test Postgres on `127.0.0.1:15432`.
-- Platform `/drift/report` emits stable drift by default; queued replay/retrain behavior is validated through direct moderate/critical agent webhook payloads and the dashboard Demo Drift Alert control.
-
-### Next Safe Task
-Add a dashboard demo control for synthetic moderate/critical drift payloads, or wire investigation history / queue visibility.
+CI/docs/release hardening, or clear/inspect historical DLQ items if you want a cleaner demo state.
 
 ### Integration Enabled
 - Dashboard can now list pending HIL approvals.

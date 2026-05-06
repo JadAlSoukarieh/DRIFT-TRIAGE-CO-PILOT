@@ -6,12 +6,19 @@ __pycache__/
 .pytest_cache
 .mypy_cache
 .ruff_cache
+.cache
 .git
 .gitignore
 .dockerignore
 *.md
 tests/
 node_modules/
+reports/
+test/
+**/.venv/
+**/__pycache__/
+platform/tmp/
+platform/pytest-cache-files-*/
 
 #project brief
 /project-brief/

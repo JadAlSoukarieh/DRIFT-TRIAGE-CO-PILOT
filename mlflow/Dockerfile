@@ -8,4 +8,4 @@ RUN pip install --no-cache-dir mlflow==3.12.0
 
 EXPOSE 5000
 
-CMD mlflow server --host 0.0.0.0 --port 5000 --serve-artifacts --backend-store-uri sqlite:///data/mlflow.db --default-artifact-root file:///data/mlruns
+CMD ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000", "--serve-artifacts", "--backend-store-uri", "sqlite:///data/mlflow.db", "--default-artifact-root", "file:///data/mlruns", "--allowed-hosts", "*"]

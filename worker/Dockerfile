@@ -1,19 +1,17 @@
-# worker/Dockerfile — Redis queue worker
-# Build context: project root (.)
-# Copies platform deps + code, worker code
-# CMD: python -m worker_app.worker.consume_queue
-# Env: REDIS_URL, MLFLOW_TRACKING_URI
-
 FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-COPY platform/pyproject.toml platform/uv.lock /deps/
-RUN cd /deps && uv sync --frozen --no-dev
+WORKDIR /app/platform
 
-COPY platform/app /app/app
-COPY worker/app /app/worker_app
+COPY platform/pyproject.toml ./pyproject.toml
+COPY platform/uv.lock ./uv.lock
+RUN uv sync --frozen --no-dev
 
-ENV PYTHONPATH=/app
+COPY platform/app ./app
+COPY worker/app /app/worker/app
+COPY initial-training/dataset /app/initial-training/dataset
 
-CMD ["uv", "run", "--directory", "/deps", "python", "-m", "worker_app.worker.consume_queue"]
+ENV PYTHONPATH=/app/platform:/app/worker/app
+
+CMD ["uv", "run", "python", "-m", "worker.consume_queue"]
