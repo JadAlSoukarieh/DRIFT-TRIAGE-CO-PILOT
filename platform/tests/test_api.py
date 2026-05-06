@@ -27,6 +27,23 @@ def _build_test_app():
     app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
     app.state.model = None
     app.state.threshold = app.state.settings.threshold
+    app.state.drift_accumulator = [
+        {
+            "age": 40, "job": "admin.", "marital": "married",
+            "education": "university.degree", "default": "no",
+            "housing": "yes", "loan": "no", "contact": "cellular",
+            "month": "may", "day_of_week": "mon", "campaign": 1,
+            "pdays": (999 if i < 50 else 0),
+            "previous": 0, "poutcome": "nonexistent",
+            "emp.var.rate": (1.1 if i < 50 else -2.0),
+            "cons.price.idx": 93.994,
+            "cons.conf.idx": -36.4,
+            "euribor3m": (4.8 if i < 50 else 2.0),
+            "nr.employed": 5191, "proba": (0.2 if i < 50 else 0.8),
+        }
+        for i in range(100)
+    ]
+    app.state.last_severity = "stable"
 
     app.include_router(drift.router, prefix="/drift", tags=["drift"])
     app.include_router(queue.router, prefix="/queue", tags=["queue"])
@@ -40,6 +57,7 @@ _TEST_APP = _build_test_app()
 @pytest.fixture
 def test_client() -> TestClient:
     """TestClient that works without model.joblib. Predict tests use predict_client in test_predict_api.py."""
+    _TEST_APP.state.last_severity = "stable"
     with TestClient(_TEST_APP) as client:
         yield client
 
@@ -81,7 +99,7 @@ def test_drift_report_endpoint(test_client):
     data = response.json()
     assert "report" in data
     assert "webhook_sent" in data
-    assert data["report"]["severity"] == "stable"
+    assert data["report"]["severity"] == "critical"
     assert data["webhook_sent"] is True
 
 

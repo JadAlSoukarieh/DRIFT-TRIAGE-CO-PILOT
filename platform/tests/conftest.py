@@ -26,6 +26,23 @@ def test_client() -> TestClient:
     minimal.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
     minimal.state.model = None
     minimal.state.threshold = minimal.state.settings.threshold
+    minimal.state.drift_accumulator = [
+        {
+            "age": 40, "job": "admin.", "marital": "married",
+            "education": "university.degree", "default": "no",
+            "housing": "yes", "loan": "no", "contact": "cellular",
+            "month": "may", "day_of_week": "mon", "campaign": 1,
+            "pdays": (999 if i < 50 else 0),
+            "previous": 0, "poutcome": "nonexistent",
+            "emp.var.rate": (1.1 if i < 50 else -2.0),
+            "cons.price.idx": 93.994,
+            "cons.conf.idx": -36.4,
+            "euribor3m": (4.8 if i < 50 else 2.0),
+            "nr.employed": 5191, "proba": (0.2 if i < 50 else 0.8),
+        }
+        for i in range(100)
+    ]
+    minimal.state.last_severity = "stable"
 
     minimal.include_router(drift.router, prefix="/drift", tags=["drift"])
     minimal.include_router(queue.router, prefix="/queue", tags=["queue"])
