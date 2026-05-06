@@ -31,5 +31,13 @@ jobs:
           cd platform && uv sync --dev && uv run pytest tests/ -v --ignore=tests/test_predict_api.py
 
       - name: Run agent tests
+        env:
+          POSTGRES_DSN: postgresql+asyncpg://user:pass@localhost:5432/drift
+          REDIS_URL: redis://localhost:6379/0
+          PLATFORM_BASE_URL: http://localhost:8000
+          LLM_PROVIDER: mock
+          LLM_MODEL: mock
+          LANGSMITH_TRACING: "false"
+          AGENT_ENV: test
         run: |
           cd agent && uv sync --dev && PYTHONPATH=.. uv run pytest tests/ -v
