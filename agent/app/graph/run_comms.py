@@ -1,12 +1,21 @@
-# agent/app/graph/run_comms.py
-"""Comms sub-agent node.
+"""Deterministic comms node for drift investigations."""
 
-Prompt: prompts/comms.txt
+from __future__ import annotations
 
-1. Summarize the investigation outcome for the dashboard
-2. Report what was detected, what action was taken, and next steps
-3. Update AgentState.messages with a human-readable summary
-4. This is the final node in the graph
+from agent.app.graph.state import AgentState
 
-TODO: Implement comms_node(state: AgentState) -> AgentState.
-"""
+
+def run_comms(state: AgentState) -> AgentState:
+    """Build a dashboard-safe summary from the chosen action."""
+
+    action = state["recommended_action"] or "none"
+    approval_required = "yes" if action in {"rollback", "promote_candidate"} else "no"
+    summary = (
+        f"Received {state['severity']} drift alert. "
+        f"Recommended action: {action}. "
+        f"Human approval required: {approval_required}."
+    )
+
+    updated = dict(state)
+    updated["comms_summary"] = summary
+    return updated

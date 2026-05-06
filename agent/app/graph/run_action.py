@@ -1,15 +1,25 @@
-# agent/app/graph/run_action.py
-"""Action sub-agent node.
+"""Deterministic action node for drift investigations."""
 
-Prompt: prompts/action.txt
+from __future__ import annotations
 
-1. Based on triage severity, decide recommended action:
-   - stable → no action
-   - moderate → replay test set, compute new metrics
-   - critical → retrain model OR rollback to last known good
-2. Set recommended_action in AgentState
-3. If action touches Production: trigger HIL interrupt
-4. Dispatch slow tools to Redis queue via tools/dispatch_*.py
+from agent.app.graph.state import AgentState
 
-TODO: Implement action_node(state: AgentState) -> AgentState.
-"""
+
+def run_action(state: AgentState) -> AgentState:
+    """Pick a safe recommended action without touching external systems."""
+
+    severity = state["severity"]
+    if severity == "stable":
+        recommended_action = "none"
+        status = "resolved"
+    elif severity == "moderate":
+        recommended_action = "replay_test"
+        status = "open"
+    else:
+        recommended_action = "retrain"
+        status = "open"
+
+    updated = dict(state)
+    updated["recommended_action"] = recommended_action
+    updated["status"] = status
+    return updated

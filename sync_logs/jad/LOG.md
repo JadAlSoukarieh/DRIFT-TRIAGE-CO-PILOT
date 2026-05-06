@@ -318,3 +318,410 @@ Passed.
 
 ### Next Safe Task
 Implement Redis dispatch tools or start LangGraph graph skeleton after HIL persistence is stable.
+
+---
+
+## 2026-05-05 — Jad / Codex Global Smoke Check
+
+### Goal
+Verified latest merged platform/worker/agent state, uv availability, tests, and Docker Compose readiness.
+
+### Branch
+test/global-smoke-2026-05-05
+
+### Commands Run
+- `git status`
+- `git branch --show-current`
+- `git log --oneline --decorate -5`
+- `git remote -v`
+- `git fetch origin --prune`
+- `git checkout main`
+- `git pull origin main`
+- `git log --oneline --decorate -5`
+- `git checkout -b test/global-smoke-2026-05-05`
+- `python --version`
+- `uv --version`
+- `docker --version`
+- `docker compose version`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `uv run pytest tests/ -v`
+- `Get-Content platform/app/routers/drift.py`
+- `Get-Content platform/app/routers/registry.py`
+- `Get-Content platform/app/services/validate_promotion.py`
+- `Get-Content platform/app/services/run_training.py`
+- `Get-Content worker/app/worker/consume_queue.py`
+- `Get-Content agent/app/tools/dispatch_replay.py`
+- `Get-Content agent/app/tools/dispatch_retrain.py`
+- `Get-Content agent/app/tools/dispatch_rollback.py`
+- `Get-Content agent/app/routers/webhook.py`
+- `Get-Content agent/app/schemas/drift_alert.py`
+- `Get-Content platform/app/schemas/promote_request.py`
+- `Get-Content contracts/webhook_v1.json`
+- `Get-Content contracts/promote_v1.json`
+- `Get-Content sync_logs/hadi/LOG.md`
+- `Get-Content sync_logs/jad/LOG.md`
+- `docker compose config`
+- `docker compose build --no-cache platform agent worker dashboard`
+- `docker compose up -d postgres redis mlflow`
+- `docker compose ps`
+- `docker compose down`
+
+### Results
+- Agent tests: pass (`Ran 13 tests in 0.181s`, `OK`)
+- Platform tests: skipped locally because `uv` is not installed
+- Worker import: skipped locally because `uv` is not installed
+- Docker compose config: fail (`.env` missing at repo root)
+- Docker build: fail (missing `uv.lock` in service contexts and worker context path/copy failures)
+- Infra startup: inconclusive after compose/config/build failures; `docker compose ps` showed no running services
+
+### Integration Check
+- drift webhook emitter: no
+- agent webhook receiver: no
+- registry promote endpoint: yes
+- worker consumer: yes
+- agent/worker queue compatibility: not verifiable on `main` because agent dispatch files are still TODO stubs there; worker expects queue `drift-triage-jobs` and idempotency key `idempotency:{investigation_id}:{action}`
+- contract mismatch risks: high for `contracts/webhook_v1.json` vs agent `DriftAlert`; low for `contracts/promote_v1.json` vs platform `PromoteRequest`
+
+### Blockers
+- `uv` missing locally
+- `.env` missing, breaking `docker compose config`
+- Docker build layout invalid for several services from current repo state
+- drift webhook integration not implemented on either side
+- agent dispatch queue logic not present on `main`
+- webhook contract/schema mismatch
+
+### Next Safe Task
+fix Docker/uv/env issue
+
+---
+
+## 2026-05-05 - Jad / Codex Local Global Smoke Setup
+
+### Goal
+Ran local global smoke setup/checks with uv, .env, tests, Docker readiness, and integration contract scan.
+
+### Branch
+main
+
+### Files Changed
+- `reports/global_smoke_2026-05-06_local.md`
+- `sync_logs/jad/LOG.md`
+- `.env.example`
+- `.env` created locally but not intended for commit
+
+### Commands Run
+- `git status`
+- `git branch --show-current`
+- `git log --oneline --decorate -5`
+- `git fetch origin --prune`
+- `git -c core.protectNTFS=false checkout main`
+- `git -c core.protectNTFS=false pull origin main`
+- `uv --version`
+- `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+- `$env:Path='C:\Users\Jad\.local\bin;' + $env:Path; uv --version`
+- `python --version`
+- `platform\.venv\Scripts\python.exe --version`
+- `Copy-Item .env.example .env`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `uv sync`
+- `uv run pytest tests/ -v`
+- `.\\.venv\\Scripts\\python.exe -m pytest tests -v`
+- `$env:PYTHONPATH="../worker/app"; .\\.venv\\Scripts\\python.exe -c "from worker.consume_queue import HANDLERS, settings; print('handlers=', list(HANDLERS.keys())); print('settings_loaded=', settings is not None)"; Remove-Item Env:PYTHONPATH`
+- `docker --version`
+- `docker compose version`
+- `docker compose config --quiet`
+- `docker compose build platform agent worker dashboard`
+- `docker compose up -d postgres redis mlflow`
+- `docker compose ps`
+- `docker compose down`
+
+### Results
+- uv: installed successfully at `C:\Users\Jad\.local\bin`; current terminal needs PATH refresh or manual PATH prepend.
+- .env: present. Secrets were not printed or recorded.
+- Azure strong model placeholder: present in `.env.example` as `AZURE_STRONG_MODEL=Kimi-K2.6-1`.
+- Agent tests: passed (`Ran 13 tests in 0.127s`, `OK`).
+- Platform tests: failed (`9 passed, 1 skipped, 3 failed, 6 errors`) because local `platform/data/model.joblib` and `platform/data/bank-additional-full.csv` are missing.
+- Worker import: passed; handlers loaded: `retrain`, `replay`, `rollback`.
+- Docker compose config: passed with `docker compose config --quiet`.
+- Docker build: failed because agent/dashboard expect missing `uv.lock` files in service build contexts, and worker Dockerfile paths do not match the configured build context.
+- Infra startup: passed for `postgres`, `redis`, and `mlflow`; services were stopped with `docker compose down` and volumes were not deleted.
+
+### Integration Check
+- agent webhook receiver: no; current `main` only has a placeholder router.
+- platform webhook emitter: no; current drift router is a report placeholder.
+- webhook contract: risk; `contracts/webhook_v1.json` and agent `DriftAlert` use different required fields.
+- promote contract: low risk; `contracts/promote_v1.json` appears aligned with platform `PromoteRequest`.
+- queue compatibility: blocked; current `main` agent dispatch tools are stubs and `queue_client.py` is absent.
+- idempotency compatibility: blocked; worker expects `idempotency:{investigation_id}:{action}`, while agent has no implemented format on `main`.
+
+### Blockers
+- Platform tests need local model and dataset artifacts or mocked dependencies.
+- Docker build context/lockfile setup needs repair.
+- Agent Redis dispatch tools are not present on `main`.
+- Agent drift webhook receiver is not implemented.
+- Platform drift webhook emitter is not implemented.
+- Webhook contract and agent schema need alignment.
+- Inspect `.env` manually: the Azure endpoint may include a duplicated variable-name prefix if copied literally from the brief.
+
+### Next Safe Task
+fix Docker build context
+
+---
+
+## 2026-05-06 - Jad / Codex Platform Path Fix Rerun
+
+### Goal
+Correct the platform dataset/model path assumptions, regenerate the local model artifact, and rerun the smoke tests.
+
+### Branch
+main
+
+### Files Changed
+- `platform/app/config/settings.py`
+- `platform/app/main.py`
+- `platform/app/services/run_training.py`
+- `platform/tests/test_fidelity.py`
+- `reports/global_smoke_2026-05-06_local.md`
+- `sync_logs/jad/LOG.md`
+- local only: `platform/.venv/pyvenv.cfg`
+- local generated artifact: `platform/data/model.joblib`
+
+### Commands Run
+- `rg -n "bank-additional-full.csv|model\.joblib|platform/data|initial-training/dataset|data/" platform tests initial-training -S`
+- `Get-Content platform/app/services/run_training.py`
+- `Get-Content platform/tests/test_fidelity.py`
+- `Get-Content platform/app/config/settings.py`
+- `Get-Content platform/app/dependencies.py`
+- `Get-Content platform/app/main.py`
+- `Get-Content platform/tests/conftest.py`
+- `docker compose up -d postgres redis mlflow`
+- `$env:MLFLOW_TRACKING_URI='http://localhost:5000'; .\.venv\Scripts\python.exe -m app.services.run_training`
+- `$env:PYTHONPATH=(Resolve-Path '.\.venv\Lib\site-packages').Path; $env:OMP_NUM_THREADS='1'; $env:LOKY_MAX_CPU_COUNT='1'; @' ... '@ | & 'C:\Users\Jad\AppData\Local\Temp\uv-python\cpython-3.12.13-windows-x86_64-none\python.exe' -`
+- `$env:PYTHONPATH=(Resolve-Path '.\.venv\Lib\site-packages').Path; $env:PYTHONIOENCODING='utf-8'; & 'C:\Users\Jad\AppData\Local\Temp\uv-python\cpython-3.12.13-windows-x86_64-none\python.exe' -m pytest tests -v -p no:cacheprovider`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `docker compose down`
+
+### Results
+- Diagnosis corrected: the dataset was already committed at `initial-training/dataset/bank-additional-full.csv`; the actual problem was hardcoded platform path assumptions.
+- Platform path fix: applied. Settings now resolve the configured platform paths and fall back to the committed dataset location.
+- Platform tests: passed (`18 passed, 1 skipped`).
+- Agent tests: passed (`Ran 13 tests`, `OK`).
+- Local training via the official platform entrypoint still hits Windows permission issues in MLflow temp artifact logging, but local model training itself succeeded and produced `platform/data/model.joblib`.
+
+### Remaining Blockers
+- `run_training.py` still has a local Windows temp-permission problem during MLflow artifact logging.
+- Docker build is still broken for `agent`, `dashboard`, and `worker`.
+- Agent webhook/dispatch integration remains incomplete on `main`.
+
+### Next Safe Task
+fix MLflow local temp handling or Docker build context, depending whether the next goal is training reproducibility or containerized smoke
+
+---
+
+## 2026-05-05 - Jad / Codex
+
+### Goal
+Implemented minimal agent `/webhook/drift` receiver and deterministic graph skeleton.
+
+### Branch
+feature/agent-webhook-graph-skeleton
+
+### Files Changed
+- `agent/app/graph/__init__.py`
+- `agent/app/graph/state.py`
+- `agent/app/graph/run_triage.py`
+- `agent/app/graph/run_action.py`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/build_graph.py`
+- `agent/app/routers/__init__.py`
+- `agent/app/routers/webhook.py`
+- `agent/app/main.py`
+- `agent/tests/test_webhook.py`
+- `agent/pyproject.toml`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status --short`
+- `git branch --show-current`
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout -b feature/agent-webhook-graph-skeleton`
+- `Get-ChildItem agent -File -Recurse -Depth 5`
+- `Get-Content agent/app/schemas/drift_alert.py`
+- `Get-Content agent/app/schemas/investigation.py`
+- `Get-Content agent/app/schemas/hil_action.py`
+- `Get-Content agent/app/main.py`
+- `Get-Content agent/app/routers/webhook.py`
+- `Get-Content agent/app/graph/build_graph.py`
+- `Get-Content agent/app/graph/run_triage.py`
+- `Get-Content agent/app/graph/run_action.py`
+- `Get-Content agent/app/graph/run_comms.py`
+- `Get-Content agent/tests/test_agent_schemas.py`
+- `Get-Content agent/tests/test_dispatch_tools.py`
+- `Get-Content agent/tests/test_request_approval.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print(app.title)"`
+- `python -m pip install --user fastapi httpx`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print(app.title)"`
+
+### Results
+- Initial test run failed because `fastapi` was not installed in the requested Python interpreter.
+- Added `fastapi` and `httpx` to `agent/pyproject.toml`.
+- Installed missing runtime dependency locally with `python -m pip install --user fastapi httpx`.
+- Agent tests passed: `Ran 27 tests in 0.444s`, `OK`.
+- Import smoke passed: `Drift Triage Co-Pilot Agent`.
+
+### Integration Enabled
+- Platform can now POST drift alerts to `/webhook/drift`.
+- Agent returns `investigation_id`, `severity`, `recommended_action`, and `summary`.
+- No real LLM required.
+- No Redis required.
+- No Postgres required at startup.
+- No Production action occurs.
+
+### Assumptions
+- Stable drift -> `none`.
+- Moderate drift -> `replay_test`.
+- Critical drift -> `retrain` candidate.
+- Production-impacting actions will require HIL later.
+
+### Decisions Made
+- Minimal graph is deterministic for testability.
+- LLM integration comes later.
+- HIL approval is not triggered for `replay_test` or `retrain` in this phase.
+- Webhook path is `/webhook/drift`.
+
+### Do Not Touch
+- `DriftAlert` schema without coordination.
+- Webhook route path without coordination.
+- `RecommendedAction` enum without coordination.
+
+### Next Safe Task
+Run platform -> agent webhook integration test, then wire optional Redis dispatch or implement HIL HTTP routes.
+
+---
+
+## 2026-05-05 - Jad / Codex Webhook Integration Test
+
+### Goal
+Created temporary integration branch and tested latest platform main with unmerged agent webhook receiver.
+
+### Branch
+`test/webhook-integration`
+
+### Merged Sources
+- `main`
+- `feature/agent-webhook-graph-skeleton`
+
+### Commands Run
+- `git status`
+- `git fetch origin --prune`
+- `git checkout main`
+- `git pull origin main`
+- `git log --oneline --decorate -5`
+- `git checkout -b test/webhook-integration`
+- `git merge feature/agent-webhook-graph-skeleton`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `uv --version`
+- `C:\Users\Jad\.local\bin\uv.exe --version`
+- `C:\Users\Jad\.local\bin\uv.exe sync`
+- `C:\Users\Jad\.local\bin\uv.exe run pytest tests/ -v -p no:cacheprovider`
+- `python -m uvicorn agent.app.main:app --host 127.0.0.1 --port 8001`
+- `curl http://127.0.0.1:8001/health`
+- `curl -X POST http://127.0.0.1:8001/webhook/drift`
+- `curl http://127.0.0.1:8000/health`
+- `curl http://127.0.0.1:8000/drift/report`
+
+### Results
+- Agent tests: passed (`Ran 27 tests`, `OK`).
+- Platform tests: `uv sync` failed due local outbound/download issue, but fallback platform test run from `platform/` passed (`19 passed, 1 skipped`).
+- Direct agent `/health`: returned `{"status":"ok","service":"agent"}`.
+- Direct agent `/webhook/drift`: returned HTTP 200 with `investigation_id`, `drift_event_id=drift-test-001`, `severity=critical`, `recommended_action=retrain`, `status=open`.
+- Platform `/health`: returned `{"status":"ok"}`.
+- Platform `/drift/report`: returned a drift report plus `"webhook_sent":false`.
+- Webhook delivery: platform attempted delivery, agent received `POST /webhook/drift`, and agent returned `422 Unprocessable Entity` because the payload shape did not match `DriftAlert`.
+
+### Contract Check
+- webhook contract compatibility: no
+- severity compatibility: yes
+- required field compatibility: no
+
+### Queue Check
+- agent queue: `ops_jobs`
+- worker queue: `drift-triage-jobs`
+- queue compatibility: no
+- idempotency compatibility: no
+
+### Blockers
+- Platform emits `DriftReport`-shaped webhook payloads, not the agent `DriftAlert` schema.
+- Agent `DriftAlert` uses `extra="forbid"`, so live platform payloads fail validation.
+- `uv` is installed but not on PATH in this shell.
+- `uv sync` cannot download Python in this environment.
+- Agent dispatch queue contract and worker consumer contract are misaligned.
+
+### Next Safe Task
+fix webhook contract mismatch
+
+---
+
+## 2026-05-05 - Jad / Codex
+
+### Goal
+Fixed the platform -> agent webhook payload contract and aligned the agent/worker queue contract.
+
+### Files Changed
+- `contracts/webhook_v1.json`
+- `platform/app/config/settings.py`
+- `platform/app/routers/drift.py`
+- `platform/tests/test_api.py`
+- `platform/tests/test_drift.py`
+- `agent/app/tools/queue_client.py`
+- `agent/app/tools/dispatch_replay.py`
+- `agent/app/tools/dispatch_retrain.py`
+- `agent/app/tools/dispatch_rollback.py`
+- `agent/tests/test_dispatch_tools.py`
+- `worker/app/worker/consume_queue.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `Get-Content contracts/webhook_v1.json`
+- `Get-Content contracts/promote_v1.json`
+- `Get-Content agent/app/schemas/drift_alert.py`
+- `Get-Content platform/app/schemas/drift_report.py`
+- `Get-Content platform/app/routers/drift.py`
+- `Get-Content agent/app/tools/queue_client.py`
+- `Get-Content agent/app/tools/dispatch_replay.py`
+- `Get-Content agent/app/tools/dispatch_retrain.py`
+- `Get-Content agent/app/tools/dispatch_rollback.py`
+- `Get-Content worker/app/worker/consume_queue.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `Set-Location platform; & C:\Users\Jad\.local\bin\uv.exe run pytest tests/ -v`
+- `Set-Location platform; $env:PYTHONPATH=(Resolve-Path '.\.venv\Lib\site-packages').Path; & 'C:\Users\Jad\AppData\Local\Temp\uv-python\cpython-3.12.13-windows-x86_64-none\python.exe' -m pytest tests -v -p no:cacheprovider`
+- local live smoke: started agent and platform locally, then called `GET /drift/report`
+
+### Tests
+- Agent tests: passed (`Ran 28 tests`, `OK`).
+- Platform tests: `uv run` failed because local uv cache initialization is blocked in `AppData`; fallback platform test run passed (`21 passed, 1 skipped`).
+- Live platform -> agent smoke: passed; `/drift/report` returned `"webhook_sent": true` and agent logged `POST /webhook/drift ... 200 OK`.
+
+### Webhook Contract Fix Result
+- Platform now converts `DriftReport` to a DriftAlert-compatible webhook payload before POSTing to the agent.
+- `contracts/webhook_v1.json` now matches the agent DriftAlert shape.
+- Platform tests include:
+  - emitted payload validates against `agent.app.schemas.drift_alert.DriftAlert`
+  - `/drift/report` returns `webhook_sent=true` when mock agent returns `200`
+  - `/drift/report` returns `webhook_sent=false` with a useful error when mock agent returns `422`
+
+### Queue Contract Fix Result
+- Agent queue name now matches worker: `drift-triage-jobs`
+- Agent payload now uses top-level `action` and top-level job fields instead of nested `payload`
+- Shared idempotency format is now `idempotency:{action}:{investigation_id}:{target_or_event}`
+- Worker accepts the canonical `replay_test` action and still normalizes legacy `replay`
+- Agent tests verify a worker-parsed agent-created payload
+
+### Remaining Blockers
+- `uv` is installed locally but not on PATH in this shell.
+- `uv run` is blocked locally by uv cache/AppData permissions, so platform tests still need the Python 3.12 fallback on this machine.
+- Old temporary integration logs under `reports/` are still untracked local artifacts.

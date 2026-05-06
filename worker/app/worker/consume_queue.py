@@ -17,22 +17,47 @@ Retries:
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
 import traceback
 from typing import Any
 
-import redis.asyncio as aioredis
-import structlog
-from pydantic_settings import BaseSettings
+try:
+    import redis.asyncio as aioredis
+except ImportError:  # pragma: no cover - local test environments may omit redis
+    aioredis = None
 
-logger = structlog.get_logger()
+try:
+    import structlog
+except ImportError:  # pragma: no cover - local test environments may omit structlog
+    structlog = None
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:  # pragma: no cover - local test environments may omit pydantic-settings
+    class BaseSettings:
+        """Minimal fallback used only for import-safe local tests."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            annotations = getattr(self.__class__, "__annotations__", {})
+            for name in annotations:
+                if hasattr(self.__class__, name):
+                    setattr(self, name, getattr(self.__class__, name))
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+
+QUEUE_NAME = "drift-triage-jobs"
+DLQ_NAME = f"DLQ:{QUEUE_NAME}"
+IDEMPOTENCY_PREFIX = "idempotency"
+
+logger = structlog.get_logger() if structlog is not None else logging.getLogger(__name__)
 
 
 class WorkerSettings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
-    queue_name: str = "drift-triage-jobs"
+    queue_name: str = QUEUE_NAME
     max_retries: int = 3
     base_backoff: float = 1.0
     idempotency_ttl: int = 3600
@@ -46,6 +71,32 @@ settings = WorkerSettings()
 
 def _platform_path() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../platform"))
+
+
+def normalize_action(action: str | None) -> str:
+    """Map legacy/alias action names to the canonical worker action."""
+
+    if action == "replay":
+        return "replay_test"
+    return action or "unknown"
+
+
+def idempotency_target(job: dict[str, Any]) -> str:
+    """Select the worker-side idempotency target suffix."""
+
+    return str(
+        job.get("target_model_version")
+        or job.get("model_version")
+        or job.get("model_uri")
+        or job.get("drift_event_id")
+        or "default"
+    )
+
+
+def build_idempotency_key(action: str, investigation_id: str, target_or_event: str) -> str:
+    """Construct the shared idempotency key format."""
+
+    return f"{IDEMPOTENCY_PREFIX}:{normalize_action(action)}:{investigation_id}:{target_or_event}"
 
 
 async def handle_retrain(job: dict[str, Any]) -> None:
@@ -71,18 +122,23 @@ async def handle_rollback(job: dict[str, Any]) -> None:
 
 HANDLERS = {
     "retrain": handle_retrain,
+    "replay_test": handle_replay,
     "replay": handle_replay,
     "rollback": handle_rollback,
 }
 
 
-async def process_job(redis: aioredis.Redis, raw: str) -> None:
+async def process_job(redis: Any, raw: str) -> None:
     job = json.loads(raw)
     investigation_id = job.get("investigation_id", "unknown")
-    action = job.get("action", "unknown")
+    action = normalize_action(job.get("action") or job.get("job_type"))
     job_id = job.get("job_id", "unknown")
 
-    idempotency_key = f"idempotency:{investigation_id}:{action}"
+    idempotency_key = job.get("idempotency_key") or build_idempotency_key(
+        action,
+        investigation_id,
+        idempotency_target(job),
+    )
 
     acquired = await redis.set(
         idempotency_key, "processing", nx=True, ex=settings.idempotency_ttl,
@@ -115,8 +171,7 @@ async def process_job(redis: aioredis.Redis, raw: str) -> None:
             )
             await asyncio.sleep(delay)
 
-    dlq_key = f"DLQ:{settings.queue_name}"
-    await redis.rpush(dlq_key, json.dumps(job))
+    await redis.rpush(DLQ_NAME, json.dumps(job))
     logger.error(
         "job_dlq",
         action=action,
@@ -128,6 +183,9 @@ async def process_job(redis: aioredis.Redis, raw: str) -> None:
 
 
 async def run_loop() -> None:
+    if aioredis is None:
+        raise RuntimeError("redis is required to run the worker queue loop.")
+
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     logger.info("worker_started", queue=settings.queue_name, redis_url=settings.redis_url)
 

@@ -1,14 +1,31 @@
-# agent/app/graph/build_graph.py
-"""LangGraph StateGraph compilation.
+"""Minimal deterministic graph runner for webhook investigations."""
 
-Builds a supervisor topology:
-1. Define AgentState TypedDict (investigation_id, drift_event, severity,
-   recommended_action, hil_approved, hil_timestamp, messages)
-2. Add nodes: supervisor, triage, action, comms
-3. Add conditional edges from supervisor to each sub-agent
-4. Add HIL interrupt node before any action that touches Production
-5. Compile with AsyncPostgresSaver checkpointer
-6. Return compiled graph
+from __future__ import annotations
 
-TODO: Implement build_graph(checkpointer) -> CompiledStateGraph.
-"""
+from uuid import uuid4
+
+from agent.app.graph.run_action import run_action
+from agent.app.graph.run_comms import run_comms
+from agent.app.graph.run_triage import run_triage
+from agent.app.graph.state import AgentState
+from agent.app.schemas.drift_alert import DriftAlert
+
+
+def run_investigation(drift_alert: DriftAlert) -> AgentState:
+    """Execute a fixed triage -> action -> comms flow in-process."""
+
+    state: AgentState = {
+        "investigation_id": str(uuid4()),
+        "drift_event_id": drift_alert.event_id,
+        "drift_alert": drift_alert,
+        "severity": drift_alert.severity,
+        "triage_summary": None,
+        "recommended_action": None,
+        "comms_summary": None,
+        "approval_id": None,
+        "status": "open",
+    }
+    state = run_triage(state)
+    state = run_action(state)
+    state = run_comms(state)
+    return state

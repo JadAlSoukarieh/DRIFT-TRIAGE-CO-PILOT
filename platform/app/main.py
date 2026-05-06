@@ -25,7 +25,7 @@ from app.routers import drift, predict, registry
 async def lifespan(app: FastAPI):
     settings = Settings()
     app.state.settings = settings
-    app.state.model = load_model(settings.model_path)
+    app.state.model = load_model(settings.resolved_model_path())
     app.state.threshold = settings.threshold
     app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
     yield

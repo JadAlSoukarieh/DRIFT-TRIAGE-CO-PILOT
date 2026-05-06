@@ -4,15 +4,21 @@ import joblib
 import numpy as np
 import pytest
 
+from app.config.settings import Settings
+
+
+def _settings() -> Settings:
+    return Settings()
+
 
 def test_model_loads():
-    model = joblib.load("data/model.joblib")
+    model = joblib.load(_settings().resolved_model_path())
     assert model is not None
     assert hasattr(model, "predict_proba")
 
 
 def test_predictions_stable():
-    model = joblib.load("data/model.joblib")
+    model = joblib.load(_settings().resolved_model_path())
     sample = {
         "age": 40, "job": "admin.", "marital": "married",
         "education": "university.degree", "default": "no", "housing": "yes",
@@ -38,6 +44,6 @@ def test_predictions_stable_after_reload():
 
 def test_compute_sha256():
     from app.services.run_training import compute_dataset_sha256
-    sha = compute_dataset_sha256("data/bank-additional-full.csv")
+    sha = compute_dataset_sha256(_settings().resolved_dataset_path())
     assert len(sha) == 64
     assert all(c in "0123456789abcdef" for c in sha)
