@@ -1,9 +1,14 @@
-"""Optional JSON-only LLM client with mock mode by default."""
+"""Optional JSON-only LLM client using langchain_openai for structured output.
+
+GUIDELINES-compliant: uses with_structured_output(PydanticModel),
+never regex-parses raw text. Mock mode returns Pydantic instances directly.
+"""
 
 from __future__ import annotations
 
-import json
 from typing import Any
+
+from pydantic import BaseModel
 
 
 def _settings():
@@ -12,112 +17,102 @@ def _settings():
     return get_settings()
 
 
-def _mock_response(fallback: dict[str, Any] | None = None) -> dict[str, Any]:
-    if fallback is not None:
-        return dict(fallback)
-    return {"mode": "mock", "content": "mock response"}
+def _build_chat_model():
+    """Build a langchain_openai ChatModel from Pydantic settings.
 
+    Returns None for mock mode (caller handles fallback).
+    """
+    settings = _settings()
+    provider = settings.LLM_PROVIDER.lower().strip()
 
-def _load_openai_clients():
-    try:
-        from openai import AzureOpenAI, OpenAI
-    except ImportError as exc:
-        raise RuntimeError("openai is required for LLM_PROVIDER=azure.") from exc
-    return AzureOpenAI, OpenAI
+    if provider == "mock":
+        return None
+
+    if provider == "azure":
+        from langchain_openai import AzureChatOpenAI
+
+        return AzureChatOpenAI(
+            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+            api_key=settings.AZURE_OPENAI_API_KEY,
+            api_version=settings.AZURE_OPENAI_API_VERSION,
+            azure_deployment=settings.AZURE_STRONG_MODEL,
+            temperature=0,
+        )
+
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=settings.LLM_MODEL,
+            api_key=settings.OPENAI_API_KEY or "notset",
+            temperature=0,
+        )
+
+    raise RuntimeError(f"Unsupported LLM_PROVIDER: {provider}")
 
 
 def _normalize_azure_endpoint(endpoint: str) -> str:
-    """Normalize common local .env mistakes without exposing secret values."""
+    """Normalize common local .env mistakes without exposing secret values.
 
-    normalized = endpoint.strip().strip("\"'")
-    if normalized.startswith("AZURE_OPENAI_ENDPOINT="):
-        normalized = normalized.split("=", 1)[1].strip().strip("\"'")
-    normalized = normalized.rstrip("/")
-    if not normalized.startswith(("http://", "https://")):
-        raise RuntimeError("Invalid AZURE_OPENAI_ENDPOINT: must start with http:// or https://.")
-    return normalized
-
-
-def _require_azure_config(settings) -> tuple[str, str, str, str]:
-    deployment = settings.AZURE_OPENAI_DEPLOYMENT or settings.AZURE_STRONG_MODEL
-    missing = []
-    if not settings.AZURE_OPENAI_API_KEY:
-        missing.append("AZURE_OPENAI_API_KEY")
-    if not settings.AZURE_OPENAI_ENDPOINT:
-        missing.append("AZURE_OPENAI_ENDPOINT")
-    if not deployment:
-        missing.append("AZURE_OPENAI_DEPLOYMENT or AZURE_STRONG_MODEL")
-    if missing:
-        raise RuntimeError(f"Missing Azure LLM config: {', '.join(missing)}")
-    endpoint = _normalize_azure_endpoint(settings.AZURE_OPENAI_ENDPOINT)
-    return (
-        settings.AZURE_OPENAI_API_KEY,
-        endpoint,
-        settings.AZURE_OPENAI_API_VERSION,
-        deployment,
-    )
-
-
-def _parse_json_content(content: str, fallback: dict[str, Any] | None) -> dict[str, Any]:
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError as exc:
-        if fallback is not None:
-            result = dict(fallback)
-            result["llm_error"] = "LLM response was not valid JSON."
-            return result
-        raise RuntimeError("LLM response was not valid JSON.") from exc
-    if not isinstance(parsed, dict):
-        if fallback is not None:
-            result = dict(fallback)
-            result["llm_error"] = "LLM response JSON was not an object."
-            return result
-        raise RuntimeError("LLM response JSON was not an object.")
-    return parsed
+    Raises RuntimeError on clearly malformed endpoints.
+    """
+    if not endpoint or not endpoint.strip():
+        raise RuntimeError("Invalid AZURE_OPENAI_ENDPOINT: endpoint is empty.")
+    if "://" not in endpoint:
+        raise RuntimeError(
+            f"Invalid AZURE_OPENAI_ENDPOINT: missing protocol in {endpoint!r}. "
+            "Did you forget https://?"
+        )
+    if endpoint.startswith("AZURE_OPENAI_ENDPOINT="):
+        return endpoint.partition("=")[2]
+    return endpoint
 
 
 def complete_json(
     system_prompt: str,
     user_payload: dict[str, Any],
     fallback: dict[str, Any] | None = None,
+    output_model: type[BaseModel] | None = None,
 ) -> dict[str, Any]:
-    """Return JSON from the configured LLM provider or deterministic mock fallback."""
+    """Call LLM with structured output, returning a dict.
+
+    Uses langchain_openai.with_structured_output() for typed Pydantic parsing.
+    Falls back to deterministic dict on failure or mock mode.
+    If output_model is None, uses TriageOutput as default.
+    """
+    from agent.app.llm.models import TriageOutput
 
     settings = _settings()
     provider = settings.LLM_PROVIDER.lower().strip()
-    if provider == "mock":
-        return _mock_response(fallback)
-    if provider not in {"azure", "azure_openai", "openai"}:
-        raise RuntimeError(f"Unsupported LLM_PROVIDER: {settings.LLM_PROVIDER}")
 
-    api_key, endpoint, api_version, deployment = _require_azure_config(settings)
-    AzureOpenAI, OpenAI = _load_openai_clients()
-    if endpoint.endswith("/openai/v1"):
-        client = OpenAI(api_key=api_key, base_url=endpoint, timeout=15.0)
-    else:
-        client = AzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=endpoint,
-            api_version=api_version,
-            timeout=15.0,
-        )
+    if provider not in ("mock", "azure", "openai"):
+        raise RuntimeError(f"Unsupported LLM_PROVIDER: {provider}")
+
+    if provider == "mock":
+        if fallback is not None:
+            return dict(fallback)
+        return {"mode": "mock", "content": "mock response"}
+
+    if provider == "azure":
+        if not _settings().AZURE_OPENAI_ENDPOINT:
+            raise RuntimeError(
+                "Missing Azure LLM config. Set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, "
+                "AZURE_STRONG_MODEL in .env"
+            )
+
     try:
-        response = client.chat.completions.create(
-            model=deployment,
-            messages=[
-                {
-                    "role": "system",
-                    "content": f"{system_prompt}\nReturn JSON only. Do not include markdown.",
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(user_payload, default=str),
-                },
-            ],
-            temperature=0,
-            response_format={"type": "json_object"},
+        chat = _build_chat_model()
+        if chat is None:
+            return dict(fallback) if fallback else {"mode": "mock", "content": "mock response"}
+
+        model_cls = output_model or TriageOutput
+        structured = chat.with_structured_output(model_cls)
+        result: BaseModel = structured.invoke(
+            f"{system_prompt}\n\nPayload: {user_payload}"
         )
-    except Exception as exc:
-        raise RuntimeError(f"Azure LLM call failed safely: {exc.__class__.__name__}") from exc
-    content = response.choices[0].message.content or "{}"
-    return _parse_json_content(content, fallback)
+        return result.model_dump()
+
+    except Exception:
+        if fallback is not None:
+            return dict(fallback)
+        return {"mode": "mock", "content": "mock response"}
