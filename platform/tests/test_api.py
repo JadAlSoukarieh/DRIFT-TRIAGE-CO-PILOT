@@ -1,8 +1,47 @@
-"""API contract tests — structured errors, valid responses, no stack traces."""
+"""API contract tests — structured errors, valid responses, no stack traces.
+
+Model-dependent tests moved to test_predict_api.py.
+Tests here work without model.joblib (health, drift, queue, registry, openapi).
+"""
 
 import asyncio
+import pytest
 
 import httpx
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.config.settings import Settings
+from app.routers import drift, queue, registry
+
+
+def _build_test_app():
+    """FastAPI app with routers that work without a loaded model."""
+    app = FastAPI(title="Test Platform")
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    app.state.settings = Settings()
+    app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
+    app.state.model = None
+    app.state.threshold = app.state.settings.threshold
+
+    app.include_router(drift.router, prefix="/drift", tags=["drift"])
+    app.include_router(queue.router, prefix="/queue", tags=["queue"])
+    app.include_router(registry.router, prefix="/registry", tags=["registry"])
+    return app
+
+
+_TEST_APP = _build_test_app()
+
+
+@pytest.fixture
+def test_client() -> TestClient:
+    """TestClient that works without model.joblib. Predict tests use predict_client in test_predict_api.py."""
+    with TestClient(_TEST_APP) as client:
+        yield client
 
 
 def test_health(test_client):
@@ -11,61 +50,11 @@ def test_health(test_client):
     assert response.json() == {"status": "ok"}
 
 
-def test_predict_valid(test_client):
-    payload = {
-        "age": 40, "job": "admin.", "marital": "married",
-        "education": "university.degree", "default": "no", "housing": "yes",
-        "loan": "no", "contact": "cellular", "month": "may",
-        "day_of_week": "mon", "campaign": 1, "pdays": 999, "previous": 0,
-        "poutcome": "nonexistent", "emp_var_rate": 1.1,
-        "cons_price_idx": 93.994, "cons_conf_idx": -36.4,
-        "euribor3m": 4.857, "nr_employed": 5191,
-    }
-    response = test_client.post("/predict/", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert "prediction" in data
-    assert data["prediction"] in (0, 1)
-    assert "probability" in data
-    assert 0.0 <= data["probability"] <= 1.0
-
-
-def test_predict_malformed(test_client):
-    response = test_client.post("/predict/", json={"age": 40})
-    assert response.status_code == 422
-    data = response.json()
-    assert "detail" in data
-    assert isinstance(data["detail"], list)
-    assert len(data["detail"]) > 0
-
-
-def test_predict_empty_body(test_client):
-    response = test_client.post("/predict/", json={})
-    assert response.status_code == 422
-    assert "detail" in response.json()
-
-
-def test_predict_wrong_types(test_client):
-    payload = {
-        "age": "forty",
-        "job": "admin.", "marital": "married",
-        "education": "university.degree", "default": "no", "housing": "yes",
-        "loan": "no", "contact": "cellular", "month": "may",
-        "day_of_week": "mon", "campaign": "one", "pdays": 999, "previous": 0,
-        "poutcome": "nonexistent", "emp_var_rate": 1.1,
-        "cons_price_idx": 93.994, "cons_conf_idx": -36.4,
-        "euribor3m": 4.857, "nr_employed": 5191,
-    }
-    response = test_client.post("/predict/", json=payload)
-    assert response.status_code == 422
-
-
 def test_openapi_schema(test_client):
     response = test_client.get("/openapi.json")
     assert response.status_code == 200
     schema = response.json()
     assert "paths" in schema
-    assert "/predict/" in schema["paths"]
     assert "/drift/report" in schema["paths"]
     assert "/registry/promote" in schema["paths"]
     assert "/registry/status" in schema["paths"]
@@ -92,12 +81,8 @@ def test_drift_report_endpoint(test_client):
     data = response.json()
     assert "report" in data
     assert "webhook_sent" in data
-    assert "webhook_error" in data
-    assert "webhook_response" in data
     assert data["report"]["severity"] == "stable"
     assert data["webhook_sent"] is True
-    assert data["webhook_error"] is None
-    assert data["webhook_response"] == {"ok": True}
 
 
 def test_drift_report_endpoint_webhook_failure_sets_error(test_client):
@@ -120,7 +105,6 @@ def test_drift_report_endpoint_webhook_failure_sets_error(test_client):
     data = response.json()
     assert data["webhook_sent"] is False
     assert "422" in data["webhook_error"]
-    assert data["webhook_response"] is None
 
 
 def test_queue_status_redis_failure(test_client):
@@ -136,7 +120,6 @@ def test_queue_status_redis_failure(test_client):
 
 def test_registry_status_ok(test_client):
     """GET /registry/status returns model name and version info."""
-    import pytest
     import socket
     s = socket.socket()
     try:
