@@ -28,6 +28,8 @@ async def lifespan(app: FastAPI):
     app.state.model = load_model(settings.resolved_model_path())
     app.state.threshold = settings.threshold
     app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
+    app.state.drift_accumulator: list[dict] = []
+    app.state.last_severity: str = "stable"
     yield
     await app.state.http_client.aclose()
 
