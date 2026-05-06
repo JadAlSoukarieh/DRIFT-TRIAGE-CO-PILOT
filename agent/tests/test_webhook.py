@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import unittest
+import importlib
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 from agent.app.main import app
+
+execute_action_module = importlib.import_module("agent.app.graph.run_execute_action")
 
 
 def sample_payload(*, severity: str = "critical") -> dict:
@@ -73,27 +77,72 @@ class WebhookTests(unittest.TestCase):
         self.assertEqual(body["recommended_action"], "none")
         self.assertEqual(body["status"], "resolved")
         self.assertEqual(body["severity"], "stable")
+        self.assertFalse(body["queued"])
+        self.assertFalse(body["requires_approval"])
+        self.assertIsNone(body["job_id"])
         self.assertTrue(body["investigation_id"])
         self.assertEqual(body["drift_event_id"], "drift-test-001")
 
     def test_moderate_drift_returns_replay_test(self) -> None:
-        response = self.client.post("/webhook/drift", json=sample_payload(severity="moderate"))
+        with patch.object(
+            execute_action_module,
+            "dispatch_replay_test",
+            new=AsyncMock(
+                return_value={
+                    "job_id": "job-replay-1",
+                    "queued": True,
+                    "queue_name": "ops_jobs",
+                }
+            ),
+        ):
+            response = self.client.post("/webhook/drift", json=sample_payload(severity="moderate"))
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["recommended_action"], "replay_test")
-        self.assertEqual(body["status"], "open")
-        self.assertIn("Human approval required: no.", body["summary"])
+        self.assertEqual(body["status"], "queued")
+        self.assertTrue(body["queued"])
+        self.assertEqual(body["job_id"], "job-replay-1")
+        self.assertEqual(body["queue_name"], "ops_jobs")
+        self.assertFalse(body["requires_approval"])
+        self.assertIn("Job queued: yes.", body["summary"])
 
     def test_critical_drift_returns_retrain(self) -> None:
-        response = self.client.post("/webhook/drift", json=sample_payload(severity="critical"))
+        with patch.object(
+            execute_action_module,
+            "dispatch_retrain",
+            new=AsyncMock(
+                return_value={
+                    "job_id": "job-retrain-1",
+                    "queued": True,
+                    "queue_name": "ops_jobs",
+                }
+            ),
+        ):
+            response = self.client.post("/webhook/drift", json=sample_payload(severity="critical"))
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["recommended_action"], "retrain")
-        self.assertEqual(body["status"], "open")
+        self.assertEqual(body["status"], "queued")
         self.assertTrue(body["investigation_id"])
         self.assertIsNone(body["approval_id"])
+        self.assertEqual(body["job_id"], "job-retrain-1")
+        self.assertTrue(body["queued"])
+
+    def test_dispatch_failure_returns_failed_status_without_stack_trace(self) -> None:
+        with patch.object(
+            execute_action_module,
+            "dispatch_retrain",
+            new=AsyncMock(side_effect=RuntimeError("redis unavailable")),
+        ):
+            response = self.client.post("/webhook/drift", json=sample_payload(severity="critical"))
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["dispatch_error"], "redis unavailable")
+        self.assertNotIn("Traceback", body["summary"])
 
     def test_extra_field_returns_422(self) -> None:
         payload = sample_payload(severity="moderate")

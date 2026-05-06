@@ -18,5 +18,10 @@ class AgentState(TypedDict):
     triage_summary: str | None
     recommended_action: RecommendedAction | None
     comms_summary: str | None
+    job_id: str | None
+    queued: bool | None
+    queue_name: str | None
+    dispatch_error: str | None
     approval_id: str | None
+    requires_approval: bool
     status: InvestigationStatus
