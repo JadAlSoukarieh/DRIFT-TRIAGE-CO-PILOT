@@ -600,3 +600,66 @@ feature/agent-webhook-graph-skeleton
 
 ### Next Safe Task
 Run platform -> agent webhook integration test, then wire optional Redis dispatch or implement HIL HTTP routes.
+
+---
+
+## 2026-05-05 - Jad / Codex Webhook Integration Test
+
+### Goal
+Created temporary integration branch and tested latest platform main with unmerged agent webhook receiver.
+
+### Branch
+`test/webhook-integration`
+
+### Merged Sources
+- `main`
+- `feature/agent-webhook-graph-skeleton`
+
+### Commands Run
+- `git status`
+- `git fetch origin --prune`
+- `git checkout main`
+- `git pull origin main`
+- `git log --oneline --decorate -5`
+- `git checkout -b test/webhook-integration`
+- `git merge feature/agent-webhook-graph-skeleton`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `uv --version`
+- `C:\Users\Jad\.local\bin\uv.exe --version`
+- `C:\Users\Jad\.local\bin\uv.exe sync`
+- `C:\Users\Jad\.local\bin\uv.exe run pytest tests/ -v -p no:cacheprovider`
+- `python -m uvicorn agent.app.main:app --host 127.0.0.1 --port 8001`
+- `curl http://127.0.0.1:8001/health`
+- `curl -X POST http://127.0.0.1:8001/webhook/drift`
+- `curl http://127.0.0.1:8000/health`
+- `curl http://127.0.0.1:8000/drift/report`
+
+### Results
+- Agent tests: passed (`Ran 27 tests`, `OK`).
+- Platform tests: `uv sync` failed due local outbound/download issue, but fallback platform test run from `platform/` passed (`19 passed, 1 skipped`).
+- Direct agent `/health`: returned `{"status":"ok","service":"agent"}`.
+- Direct agent `/webhook/drift`: returned HTTP 200 with `investigation_id`, `drift_event_id=drift-test-001`, `severity=critical`, `recommended_action=retrain`, `status=open`.
+- Platform `/health`: returned `{"status":"ok"}`.
+- Platform `/drift/report`: returned a drift report plus `"webhook_sent":false`.
+- Webhook delivery: platform attempted delivery, agent received `POST /webhook/drift`, and agent returned `422 Unprocessable Entity` because the payload shape did not match `DriftAlert`.
+
+### Contract Check
+- webhook contract compatibility: no
+- severity compatibility: yes
+- required field compatibility: no
+
+### Queue Check
+- agent queue: `ops_jobs`
+- worker queue: `drift-triage-jobs`
+- queue compatibility: no
+- idempotency compatibility: no
+
+### Blockers
+- Platform emits `DriftReport`-shaped webhook payloads, not the agent `DriftAlert` schema.
+- Agent `DriftAlert` uses `extra="forbid"`, so live platform payloads fail validation.
+- `uv` is installed but not on PATH in this shell.
+- `uv sync` cannot download Python in this environment.
+- Agent dispatch queue contract and worker consumer contract are misaligned.
+
+### Next Safe Task
+fix webhook contract mismatch
