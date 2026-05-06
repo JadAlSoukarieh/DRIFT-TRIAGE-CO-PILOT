@@ -666,3 +666,74 @@ feature/agent-hil-routes
 
 ### Next Safe Task
 Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
+
+---
+
+## 2026-05-05 - Jad / Codex
+
+### Goal
+Wired agent graph action decisions to Redis dispatch tools and HIL approval creation.
+
+### Branch
+feature/agent-action-execution
+
+### Files Changed
+- `agent/app/graph/__init__.py`
+- `agent/app/graph/build_graph.py`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/run_execute_action.py`
+- `agent/app/graph/state.py`
+- `agent/app/routers/webhook.py`
+- `agent/tests/test_action_execution.py`
+- `agent/tests/test_webhook.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout -b feature/agent-action-execution`
+- `git merge feature/agent-hil-routes`
+- `Get-Content agent/app/graph/state.py`
+- `Get-Content agent/app/graph/build_graph.py`
+- `Get-Content agent/app/graph/run_action.py`
+- `Get-Content agent/app/graph/run_comms.py`
+- `Get-Content agent/app/graph/run_triage.py`
+- `Get-Content agent/app/routers/webhook.py`
+- `Get-Content agent/app/services/request_approval.py`
+- `Get-Content agent/app/tools/dispatch_replay.py`
+- `Get-Content agent/app/tools/dispatch_retrain.py`
+- `Get-Content agent/app/tools/dispatch_rollback.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print([r.path for r in app.routes])"`
+
+### Results
+- Graph action execution now runs after deterministic action selection.
+- Moderate drift can enqueue `replay_test`.
+- Critical drift can enqueue `retrain`.
+- Production-impacting actions create pending HIL approvals instead of dispatching directly.
+
+### Integration Enabled
+- moderate drift can enqueue replay_test
+- critical drift can enqueue retrain
+- production-impacting actions create pending HIL approval instead of dispatching directly
+- webhook response now includes job/approval execution metadata
+
+### Assumptions
+- retrain creates candidate only and does not touch Production
+- rollback/promote_candidate require HIL approval
+- worker consumes jobs from `drift-triage-jobs`
+- agent does not execute slow tools directly
+
+### Decisions Made
+- graph remains deterministic for now
+- Redis failure is captured as `dispatch_error`
+- HIL approval is required before Production-impacting action
+
+### Do Not Touch
+- queue name/idempotency format without coordination
+- HIL approval schema without coordination
+- webhook route path without coordination
+
+### Next Safe Task
+Implement dashboard HIL inbox or run full platform -> agent -> Redis smoke test.
