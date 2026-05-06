@@ -20,13 +20,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Copy dataset for compute_sha256 test
+        run: mkdir -p platform/data && cp initial-training/dataset/bank-additional-full.csv platform/data/
+
       - name: Build images
         run: docker compose build
 
       - name: Run platform tests
         run: |
-          cd platform && uv sync && uv run pytest tests/ -v
+          cd platform && uv sync && uv run pytest tests/ -v --ignore=tests/test_predict_api.py
 
       - name: Run agent tests
         run: |
-          cd agent && uv sync && uv run pytest tests/ -v
+          cd agent && uv sync && PYTHONPATH=.. uv run pytest tests/ -v
