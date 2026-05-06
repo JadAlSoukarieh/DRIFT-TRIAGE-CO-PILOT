@@ -515,3 +515,249 @@ main
 
 ### Next Safe Task
 fix MLflow local temp handling or Docker build context, depending whether the next goal is training reproducibility or containerized smoke
+
+---
+
+## 2026-05-05 - Jad / Codex
+
+### Goal
+Implemented minimal agent `/webhook/drift` receiver and deterministic graph skeleton.
+
+### Branch
+feature/agent-webhook-graph-skeleton
+
+### Files Changed
+- `agent/app/graph/__init__.py`
+- `agent/app/graph/state.py`
+- `agent/app/graph/run_triage.py`
+- `agent/app/graph/run_action.py`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/build_graph.py`
+- `agent/app/routers/__init__.py`
+- `agent/app/routers/webhook.py`
+- `agent/app/main.py`
+- `agent/tests/test_webhook.py`
+- `agent/pyproject.toml`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status --short`
+- `git branch --show-current`
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout -b feature/agent-webhook-graph-skeleton`
+- `Get-ChildItem agent -File -Recurse -Depth 5`
+- `Get-Content agent/app/schemas/drift_alert.py`
+- `Get-Content agent/app/schemas/investigation.py`
+- `Get-Content agent/app/schemas/hil_action.py`
+- `Get-Content agent/app/main.py`
+- `Get-Content agent/app/routers/webhook.py`
+- `Get-Content agent/app/graph/build_graph.py`
+- `Get-Content agent/app/graph/run_triage.py`
+- `Get-Content agent/app/graph/run_action.py`
+- `Get-Content agent/app/graph/run_comms.py`
+- `Get-Content agent/tests/test_agent_schemas.py`
+- `Get-Content agent/tests/test_dispatch_tools.py`
+- `Get-Content agent/tests/test_request_approval.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print(app.title)"`
+- `python -m pip install --user fastapi httpx`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print(app.title)"`
+
+### Results
+- Initial test run failed because `fastapi` was not installed in the requested Python interpreter.
+- Added `fastapi` and `httpx` to `agent/pyproject.toml`.
+- Installed missing runtime dependency locally with `python -m pip install --user fastapi httpx`.
+- Agent tests passed: `Ran 27 tests in 0.444s`, `OK`.
+- Import smoke passed: `Drift Triage Co-Pilot Agent`.
+
+### Integration Enabled
+- Platform can now POST drift alerts to `/webhook/drift`.
+- Agent returns `investigation_id`, `severity`, `recommended_action`, and `summary`.
+- No real LLM required.
+- No Redis required.
+- No Postgres required at startup.
+- No Production action occurs.
+
+### Assumptions
+- Stable drift -> `none`.
+- Moderate drift -> `replay_test`.
+- Critical drift -> `retrain` candidate.
+- Production-impacting actions will require HIL later.
+
+### Decisions Made
+- Minimal graph is deterministic for testability.
+- LLM integration comes later.
+- HIL approval is not triggered for `replay_test` or `retrain` in this phase.
+- Webhook path is `/webhook/drift`.
+
+### Do Not Touch
+- `DriftAlert` schema without coordination.
+- Webhook route path without coordination.
+- `RecommendedAction` enum without coordination.
+
+### Next Safe Task
+Run platform -> agent webhook integration test, then wire optional Redis dispatch or implement HIL HTTP routes.
+
+---
+
+## 2026-05-05 - Jad / Codex
+
+### Goal
+Implemented HIL HTTP routes for pending approvals and approve/reject actions.
+
+### Branch
+feature/agent-hil-routes
+
+### Files Changed
+- `agent/app/routers/hil.py`
+- `agent/app/routers/__init__.py`
+- `agent/app/main.py`
+- `agent/tests/test_hil_routes.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout -b feature/agent-hil-routes`
+- `git merge feature/agent-webhook-graph-skeleton`
+- `Get-Content agent/app/main.py`
+- `Get-Content agent/app/routers/hil.py`
+- `Get-Content agent/app/routers/__init__.py`
+- `Get-Content agent/app/schemas/hil_action.py`
+- `Get-Content agent/app/services/request_approval.py`
+- `Get-Content agent/tests/test_request_approval.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print([r.path for r in app.routes])"`
+
+### Results
+- Agent tests passed: `Ran 35 tests in 0.533s`, `OK`.
+- Import smoke passed and exposed the expected route list:
+  - `/webhook/drift`
+  - `/hil/pending`
+  - `/hil/{approval_id}`
+  - `/hil/{approval_id}/approve`
+  - `/hil/{approval_id}/reject`
+  - `/health`
+
+### Integration Enabled
+- Dashboard can now list pending HIL approvals.
+- Human can approve/reject through agent HTTP API.
+- Approval state uses existing Postgres persistence service.
+- No Production change happens inside the HIL route itself.
+
+### Assumptions
+- Production-impacting actions will later require an approved HILAction.
+- HIL route only changes approval status.
+- Worker/platform promotion is triggered later by graph/tool logic.
+
+### Decisions Made
+- Invalid approval transitions return 409.
+- Missing approvals return 404.
+- HIL route does not directly promote or rollback models.
+
+### Do Not Touch
+- HILAction schema without coordination.
+- hil_approvals database schema without coordination.
+- approve/reject route paths without coordination.
+
+### Next Safe Task
+Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
+
+---
+
+## 2026-05-05 - Jad / Codex
+
+### Goal
+Wired agent graph action decisions to Redis dispatch tools and HIL approval creation.
+
+### Branch
+feature/agent-action-execution
+
+### Files Changed
+- `agent/app/graph/__init__.py`
+- `agent/app/graph/build_graph.py`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/run_execute_action.py`
+- `agent/app/graph/state.py`
+- `agent/app/routers/webhook.py`
+- `agent/tests/test_action_execution.py`
+- `agent/tests/test_webhook.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout -b feature/agent-action-execution`
+- `git merge feature/agent-hil-routes`
+- `Get-Content agent/app/graph/state.py`
+- `Get-Content agent/app/graph/build_graph.py`
+- `Get-Content agent/app/graph/run_action.py`
+- `Get-Content agent/app/graph/run_comms.py`
+- `Get-Content agent/app/graph/run_triage.py`
+- `Get-Content agent/app/routers/webhook.py`
+- `Get-Content agent/app/services/request_approval.py`
+- `Get-Content agent/app/tools/dispatch_replay.py`
+- `Get-Content agent/app/tools/dispatch_retrain.py`
+- `Get-Content agent/app/tools/dispatch_rollback.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print([r.path for r in app.routes])"`
+
+### Results
+- Graph action execution now runs after deterministic action selection.
+- Moderate drift can enqueue `replay_test`.
+- Critical drift can enqueue `retrain`.
+- Production-impacting actions create pending HIL approvals instead of dispatching directly.
+
+### Integration Enabled
+- moderate drift can enqueue replay_test
+- critical drift can enqueue retrain
+- production-impacting actions create pending HIL approval instead of dispatching directly
+- webhook response now includes job/approval execution metadata
+
+### Assumptions
+- retrain creates candidate only and does not touch Production
+- rollback/promote_candidate require HIL approval
+- worker consumes jobs from `drift-triage-jobs`
+- agent does not execute slow tools directly
+
+### Decisions Made
+- graph remains deterministic for now
+- Redis failure is captured as `dispatch_error`
+- HIL approval is required before Production-impacting action
+
+### Do Not Touch
+- queue name/idempotency format without coordination
+- HIL approval schema without coordination
+- webhook route path without coordination
+
+### Next Safe Task
+Implement dashboard HIL inbox or run full platform -> agent -> Redis smoke test.
+
+### Integration Enabled
+- Dashboard can now list pending HIL approvals.
+- Human can approve/reject through agent HTTP API.
+- Approval state uses existing Postgres persistence service.
+- No Production change happens inside the HIL route itself.
+
+### Assumptions
+- Production-impacting actions will later require an approved HILAction.
+- HIL route only changes approval status.
+- Worker/platform promotion is triggered later by graph/tool logic.
+
+### Decisions Made
+- Invalid approval transitions return 409.
+- Missing approvals return 404.
+- HIL route does not directly promote or rollback models.
+
+### Do Not Touch
+- HILAction schema without coordination.
+- hil_approvals database schema without coordination.
+- approve/reject route paths without coordination.
+
+### Next Safe Task
+Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.

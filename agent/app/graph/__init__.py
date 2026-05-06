@@ -1,2 +1,6 @@
-# agent/app/graph/__init__.py
-"""LangGraph agent graph — supervisor topology with 3 sub-agents."""
+"""Minimal deterministic graph helpers for the agent."""
+
+from agent.app.graph.build_graph import run_investigation
+from agent.app.graph.state import AgentState
+
+__all__ = ["AgentState", "run_investigation"]

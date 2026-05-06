@@ -9,7 +9,9 @@ from typing import Any, Literal
 from uuid import uuid4
 
 
-OPS_JOBS_QUEUE = "ops_jobs"
+QUEUE_NAME = "drift-triage-jobs"
+DLQ_NAME = f"DLQ:{QUEUE_NAME}"
+IDEMPOTENCY_PREFIX = "idempotency"
 OPS_IDEMPOTENCY_SET = "ops_job_idempotency_keys"
 JobType = Literal["replay_test", "retrain", "rollback"]
 
@@ -41,6 +43,16 @@ def get_redis_client() -> Any:
     return redis_asyncio.from_url(_get_redis_url(), decode_responses=True)
 
 
+def build_idempotency_key(
+    action: JobType,
+    investigation_id: str,
+    target_or_event: str,
+) -> str:
+    """Construct the shared worker-compatible idempotency key."""
+
+    return f"{IDEMPOTENCY_PREFIX}:{action}:{investigation_id}:{target_or_event}"
+
+
 def build_job_payload(
     job_type: JobType,
     payload: dict[str, Any],
@@ -50,10 +62,9 @@ def build_job_payload(
 
     return {
         "job_id": str(uuid4()),
-        "job_type": job_type,
+        "action": job_type,
         "idempotency_key": idempotency_key,
-        "payload": payload,
-        "status": "queued",
+        **payload,
         "attempts": 0,
         "max_attempts": 3,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -64,7 +75,7 @@ async def enqueue_job(
     job_type: JobType,
     payload: dict[str, Any],
     idempotency_key: str,
-    queue_name: str = OPS_JOBS_QUEUE,
+    queue_name: str = QUEUE_NAME,
 ) -> dict[str, Any]:
     """Queue a job once, guarded by a Redis idempotency set."""
 
@@ -79,7 +90,7 @@ async def enqueue_job(
         if not added:
             return {
                 "job_id": job_payload["job_id"],
-                "job_type": job_type,
+                "action": job_type,
                 "idempotency_key": idempotency_key,
                 "queued": False,
                 "duplicate": True,
@@ -89,7 +100,7 @@ async def enqueue_job(
         await client.rpush(queue_name, json.dumps(job_payload))
         return {
             "job_id": job_payload["job_id"],
-            "job_type": job_type,
+            "action": job_type,
             "idempotency_key": idempotency_key,
             "queued": True,
             "duplicate": False,

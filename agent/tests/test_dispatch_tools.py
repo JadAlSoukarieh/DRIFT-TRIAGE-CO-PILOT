@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import importlib
+import json
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 queue_client = importlib.import_module("agent.app.tools.queue_client")
 dispatch_replay_module = importlib.import_module("agent.app.tools.dispatch_replay")
 dispatch_retrain_module = importlib.import_module("agent.app.tools.dispatch_retrain")
 dispatch_rollback_module = importlib.import_module("agent.app.tools.dispatch_rollback")
+worker_consume_queue = importlib.import_module("worker.app.worker.consume_queue")
 
 
 class FakeRedisClient:
@@ -29,6 +31,10 @@ class FakeRedisClient:
         self.rpush_calls.append((key, value))
         return 1
 
+    async def set(self, key: str, value: str, nx: bool, ex: int) -> bool:
+        self.sadd_calls.append((key, value))
+        return True
+
     async def aclose(self) -> None:
         self.closed = True
 
@@ -39,11 +45,11 @@ class DispatchToolTests(IsolatedAsyncioTestCase):
     async def test_replay_dispatch_builds_job_type_and_idempotency_key(self) -> None:
         response = {
             "job_id": "job-1",
-            "job_type": "replay_test",
-            "idempotency_key": "replay_test:inv-1:7",
+            "action": "replay_test",
+            "idempotency_key": "idempotency:replay_test:inv-1:7",
             "queued": True,
             "duplicate": False,
-            "queue_name": "ops_jobs",
+            "queue_name": "drift-triage-jobs",
         }
 
         with patch.object(dispatch_replay_module, "enqueue_job", return_value=response) as enqueue_mock:
@@ -59,17 +65,17 @@ class DispatchToolTests(IsolatedAsyncioTestCase):
         self.assertEqual(enqueue_mock.await_args.kwargs["job_type"], "replay_test")
         self.assertEqual(
             enqueue_mock.await_args.kwargs["idempotency_key"],
-            "replay_test:inv-1:7",
+            "idempotency:replay_test:inv-1:7",
         )
 
     async def test_retrain_dispatch_builds_job_type_and_idempotency_key(self) -> None:
         response = {
             "job_id": "job-2",
-            "job_type": "retrain",
-            "idempotency_key": "retrain:inv-2:evt-2",
+            "action": "retrain",
+            "idempotency_key": "idempotency:retrain:inv-2:evt-2",
             "queued": False,
             "duplicate": True,
-            "queue_name": "ops_jobs",
+            "queue_name": "drift-triage-jobs",
         }
 
         with patch.object(dispatch_retrain_module, "enqueue_job", return_value=response) as enqueue_mock:
@@ -84,7 +90,7 @@ class DispatchToolTests(IsolatedAsyncioTestCase):
         self.assertEqual(enqueue_mock.await_args.kwargs["job_type"], "retrain")
         self.assertEqual(
             enqueue_mock.await_args.kwargs["idempotency_key"],
-            "retrain:inv-2:evt-2",
+            "idempotency:retrain:inv-2:evt-2",
         )
 
     async def test_rollback_dispatch_requires_approval_id(self) -> None:
@@ -100,11 +106,11 @@ class DispatchToolTests(IsolatedAsyncioTestCase):
     async def test_rollback_dispatch_builds_correct_payload(self) -> None:
         response = {
             "job_id": "job-3",
-            "job_type": "rollback",
-            "idempotency_key": "rollback:inv-3:4",
+            "action": "rollback",
+            "idempotency_key": "idempotency:rollback:inv-3:4",
             "queued": True,
             "duplicate": False,
-            "queue_name": "ops_jobs",
+            "queue_name": "drift-triage-jobs",
         }
 
         with patch.object(dispatch_rollback_module, "enqueue_job", return_value=response) as enqueue_mock:
@@ -131,11 +137,11 @@ class DispatchToolTests(IsolatedAsyncioTestCase):
     async def test_duplicate_result_is_returned_unchanged(self) -> None:
         response = {
             "job_id": "job-4",
-            "job_type": "replay_test",
-            "idempotency_key": "replay_test:inv-4:evt-4",
+            "action": "replay_test",
+            "idempotency_key": "idempotency:replay_test:inv-4:evt-4",
             "queued": False,
             "duplicate": True,
-            "queue_name": "ops_jobs",
+            "queue_name": "drift-triage-jobs",
         }
 
         with patch.object(dispatch_replay_module, "enqueue_job", return_value=response):
@@ -151,16 +157,19 @@ class DispatchToolTests(IsolatedAsyncioTestCase):
         payload = queue_client.build_job_payload(
             job_type="retrain",
             payload={"investigation_id": "inv-5"},
-            idempotency_key="retrain:inv-5:evt-5",
+            idempotency_key="idempotency:retrain:inv-5:evt-5",
         )
 
         self.assertEqual(payload["attempts"], 0)
         self.assertEqual(payload["max_attempts"], 3)
-        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(payload["action"], "retrain")
+        self.assertEqual(payload["investigation_id"], "inv-5")
+        self.assertNotIn("payload", payload)
         self.assertIn("created_at", payload)
 
     def test_idempotency_set_name_is_stable(self) -> None:
         self.assertEqual(queue_client.OPS_IDEMPOTENCY_SET, "ops_job_idempotency_keys")
+        self.assertEqual(queue_client.QUEUE_NAME, "drift-triage-jobs")
 
     async def test_enqueue_job_uses_idempotency_set_and_queue(self) -> None:
         client = FakeRedisClient(sadd_result=1)
@@ -169,13 +178,16 @@ class DispatchToolTests(IsolatedAsyncioTestCase):
             result = await queue_client.enqueue_job(
                 job_type="retrain",
                 payload={"investigation_id": "inv-6"},
-                idempotency_key="retrain:inv-6:evt-6",
+                idempotency_key="idempotency:retrain:inv-6:evt-6",
             )
 
         self.assertTrue(result["queued"])
         self.assertFalse(result["duplicate"])
         self.assertEqual(client.sadd_calls[0][0], "ops_job_idempotency_keys")
-        self.assertEqual(client.rpush_calls[0][0], "ops_jobs")
+        self.assertEqual(client.rpush_calls[0][0], "drift-triage-jobs")
+        pushed = json.loads(client.rpush_calls[0][1])
+        self.assertEqual(pushed["action"], "retrain")
+        self.assertEqual(pushed["investigation_id"], "inv-6")
         self.assertTrue(client.closed)
 
     async def test_enqueue_job_duplicate_does_not_push(self) -> None:
@@ -185,9 +197,35 @@ class DispatchToolTests(IsolatedAsyncioTestCase):
             result = await queue_client.enqueue_job(
                 job_type="rollback",
                 payload={"investigation_id": "inv-7"},
-                idempotency_key="rollback:inv-7:1",
+                idempotency_key="idempotency:rollback:inv-7:1",
             )
 
         self.assertFalse(result["queued"])
         self.assertTrue(result["duplicate"])
         self.assertEqual(client.rpush_calls, [])
+
+    async def test_worker_can_parse_agent_created_job_payload(self) -> None:
+        redis = FakeRedisClient()
+        handler = AsyncMock()
+        job = queue_client.build_job_payload(
+            job_type="replay_test",
+            payload={
+                "investigation_id": "inv-8",
+                "drift_event_id": "evt-8",
+                "model_name": "bank_marketing_pipeline",
+            },
+            idempotency_key="idempotency:replay_test:inv-8:evt-8",
+        )
+
+        with patch.dict(worker_consume_queue.HANDLERS, {"replay_test": handler}, clear=False):
+            await worker_consume_queue.process_job(redis, json.dumps(job))
+
+        handler.assert_awaited_once()
+        self.assertEqual(
+            worker_consume_queue.build_idempotency_key(
+                job["action"],
+                job["investigation_id"],
+                worker_consume_queue.idempotency_target(job),
+            ),
+            job["idempotency_key"],
+        )

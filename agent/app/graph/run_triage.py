@@ -1,12 +1,20 @@
-# agent/app/graph/run_triage.py
-"""Triage sub-agent node.
+"""Deterministic triage node for drift investigations."""
 
-Prompt: prompts/triage.txt
+from __future__ import annotations
 
-1. Analyze the drift report (PSI scores, chi² scores, output drift)
-2. Classify severity: stable / moderate / critical
-3. Identify which features drifted and by how much
-4. Update AgentState.severity and add analysis to messages
+from agent.app.graph.state import AgentState
 
-TODO: Implement triage_node(state: AgentState) -> AgentState.
-"""
+
+def run_triage(state: AgentState) -> AgentState:
+    """Set a deterministic triage summary from the incoming severity."""
+
+    severity = state["drift_alert"].severity
+    summary_map = {
+        "stable": "No significant drift detected.",
+        "moderate": "Moderate drift detected. Replay test recommended.",
+        "critical": "Critical drift detected. Retraining candidate should be considered.",
+    }
+    updated = dict(state)
+    updated["severity"] = severity
+    updated["triage_summary"] = summary_map[severity]
+    return updated
