@@ -1,3 +1,5 @@
+name: drift-triage-copilot
+
 services:
   platform:
     build: ./platform
@@ -23,7 +25,9 @@ services:
       - drift-net
 
   worker:
-    build: ./worker
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
     env_file: .env
     volumes:
       - ./platform/data:/app/data
