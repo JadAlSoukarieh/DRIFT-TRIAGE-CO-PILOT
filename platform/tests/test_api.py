@@ -118,22 +118,29 @@ def test_queue_status_redis_failure(test_client):
     assert "Redis unavailable" in data["worker_note"]
 
 
-def test_registry_status_ok(test_client):
-    """GET /registry/status returns model name and version info."""
-    import socket
-    s = socket.socket()
-    try:
-        s.settimeout(1)
-        s.connect(("localhost", 5000))
-        s.close()
-    except Exception:
-        s.close()
-        pytest.skip("MLflow server not running — skipping registry status test")
+def test_registry_status_ok(test_client, monkeypatch):
+    """GET /registry/status returns model name and version info without live MLflow."""
+
+    class FakeModelVersion:
+        version = "1"
+        last_updated_timestamp = None
+
+    class FakeMlflowClient:
+        def get_model_version_by_alias(self, name, alias):
+            if alias == "candidate":
+                return FakeModelVersion()
+            raise RuntimeError("Production alias not set")
+
+    monkeypatch.setattr(registry.mlflow, "set_tracking_uri", lambda uri: None)
+    monkeypatch.setattr(registry, "MlflowClient", FakeMlflowClient)
+
     response = test_client.get("/registry/status")
     assert response.status_code == 200
     data = response.json()
     assert "registered_model_name" in data
     assert data["registered_model_name"] == "bank_marketing_pipeline"
+    assert data["candidate_version"] == "1"
+    assert data["production_version"] is None
     assert "status" in data
 
 
