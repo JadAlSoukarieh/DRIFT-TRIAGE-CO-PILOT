@@ -11,7 +11,7 @@ def get_postgres_dsn() -> str:
 
     from agent.app.config.settings import get_settings
 
-    return get_settings().POSTGRES_DSN
+    return get_settings().POSTGRES_DSN.replace("postgresql+asyncpg://", "postgresql://", 1)
 
 
 def _load_async_postgres_saver() -> type[Any]:
