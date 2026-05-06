@@ -732,6 +732,94 @@ feature/langgraph-llm-wrapper
 ### Next Safe Task
 Run full local demo smoke, then Docker Compose hardening.
 
+## 2026-05-06 — Jad / Codex LangSmith Verification
+
+### Goal
+Verified live LangSmith tracing for the agent LangGraph flow without printing secrets.
+
+### Branch
+feature/langgraph-llm-wrapper
+
+### Files Changed
+- `agent/app/graph/build_graph.py`
+- `agent/tests/test_langgraph_wrapper.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "... run_investigation(...) ... wait_for_all_tracers()"`
+- `python -c "... Client(...).list_runs(...) ..."`
+
+### Results
+- Agent tests: passed, 54 tests OK with mock/no-tracing test isolation.
+- Live graph smoke: passed with Azure enabled.
+- LangSmith query: found recent runs for `LangGraph`, `triage`, `action`, `execute_action`, and `comms`.
+- Secrets were not printed.
+
+### Decisions Made
+- Pydantic `.env` LangSmith settings are bridged into process environment before graph compilation.
+- Unit tests force mock/no-tracing mode so local `.env` tracing does not slow or destabilize tests.
+
+### Next Safe Task
+Run full local demo smoke with agent, platform, dashboard, and Redis.
+
+## 2026-05-06 — Jad / Codex Full App Smoke Fix
+
+### Goal
+Made the local demo runnable end-to-end with dashboard, platform, agent, Redis, and Postgres persistence.
+
+### Branch
+feature/langgraph-llm-wrapper
+
+### Files Changed
+- `.env.example`
+- `.gitignore`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/run_triage.py`
+- `agent/app/services/request_approval.py`
+- `dashboard/.dockerignore`
+- `dashboard/Dockerfile`
+- `dashboard/app.py`
+- `dashboard/pyproject.toml`
+- `docker-compose.yml`
+- `sync_logs/jad/LOG.md`
+- `test/full_app_smoke_2026-05-06.md`
+
+### Commands Run
+- `python -m py_compile dashboard/app.py agent/app/graph/run_triage.py agent/app/graph/run_comms.py agent/app/services/request_approval.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `docker compose config`
+- `docker compose up -d postgres redis`
+- `Invoke-WebRequest http://127.0.0.1:8001/health`
+- `Invoke-WebRequest http://127.0.0.1:8001/hil/pending`
+- `Invoke-WebRequest http://127.0.0.1:8000/drift/report`
+- `Invoke-WebRequest http://127.0.0.1:8501`
+
+### Results
+- Agent tests: passed, 54 tests OK.
+- Dashboard syntax: passed.
+- Docker Compose config: passed.
+- Dashboard: HTTP 200 on `127.0.0.1:8501`.
+- Platform drift report: HTTP 200 with `webhook_sent: true`.
+- Direct critical webhook: queued `retrain` job on `drift-triage-jobs`.
+- HIL persistence: Postgres saved and returned a demo pending approval.
+
+### Fixes
+- Replaced placeholder dashboard with robust Streamlit HIL dashboard.
+- Fixed dashboard Docker dependencies and `.dockerignore`.
+- Wired Docker Compose service URLs for dashboard, platform, and agent.
+- Changed local Postgres host port to `55432` to avoid Windows host port conflict.
+- Stable drift bypasses Azure LLM so platform webhook does not timeout.
+- HIL persistence normalizes `postgresql+asyncpg://` DSNs for `asyncpg`.
+
+### Postgres Persistence
+- Postgres uses Docker named volume `pgdata`.
+- `postgres/init.sql` creates `investigations` and `hil_approvals`.
+- HIL approval inserted during smoke and returned by `/hil/pending`.
+
+### Next Safe Task
+Run the browser demo, then commit and push the runnable branch.
+
 ---
 
 ## 2026-05-06 - Jad / Codex

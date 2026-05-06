@@ -1,3 +1,8 @@
+"""Streamlit command-center dashboard for Drift Triage Co-Pilot."""
+
+from __future__ import annotations
+
+import os
 """Streamlit dashboard for Drift Triage Co-Pilot."""
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Drift Triage Co-Pilot",
+    page_icon="🛰️",
     page_icon="T",
     layout="wide",
 )
@@ -38,6 +44,9 @@ def get_json(url: str, timeout: int = 5) -> dict[str, Any]:
         data = response.json()
     except ValueError:
         data = None
+        error = "Service returned a non-JSON response."
+    else:
+        error = None
         json_error = "Response was not valid JSON."
     else:
         json_error = None
@@ -47,6 +56,12 @@ def get_json(url: str, timeout: int = 5) -> dict[str, Any]:
             "ok": False,
             "status_code": response.status_code,
             "data": data,
+            "error": error or f"HTTP {response.status_code}",
+        }
+    return {"ok": True, "status_code": response.status_code, "data": data, "error": error}
+
+
+def post_json(url: str, payload: dict[str, Any], timeout: int = 5) -> dict[str, Any]:
             "error": f"HTTP {response.status_code}",
         }
     if json_error:
@@ -70,6 +85,61 @@ def post_json(url: str, payload: dict[str, Any], timeout: int = 5) -> dict[str, 
         data = response.json()
     except ValueError:
         data = None
+        error = "Service returned a non-JSON response."
+    else:
+        error = None
+
+    if not response.ok:
+        return {
+            "ok": False,
+            "status_code": response.status_code,
+            "data": data,
+            "error": error or f"HTTP {response.status_code}",
+        }
+    return {"ok": True, "status_code": response.status_code, "data": data, "error": error}
+
+
+def check_service_health(base_url: str) -> dict[str, Any]:
+    return get_json(f"{base_url}/health", timeout=3)
+
+
+def status_chip(label: str, kind: str) -> str:
+    return f'<span class="chip chip-{kind}">{label}</span>'
+
+
+def as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def extract_pending_approvals(result: dict[str, Any]) -> list[dict[str, Any]]:
+    data = result.get("data")
+    if isinstance(data, dict):
+        return [item for item in as_list(data.get("approvals")) if isinstance(item, dict)]
+    return []
+
+
+def drift_summary(result: dict[str, Any] | None) -> tuple[str, str]:
+    if not result:
+        return "Not run", "warning"
+    if not result.get("ok"):
+        return "Failed", "failed"
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    webhook_sent = data.get("webhook_sent")
+    if webhook_sent is True:
+        return "Webhook sent", "success"
+    if webhook_sent is False:
+        return "Webhook failed", "failed"
+    return "Completed", "success"
+
+
+def render_card(title: str, value: str, chip_label: str, chip_kind: str, note: str = "") -> None:
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+          <div class="kpi-title">{title}</div>
+          <div class="kpi-value">{value}</div>
+          <div>{status_chip(chip_label, chip_kind)}</div>
+          <div class="kpi-note">{note}</div>
         json_error = "Response was not valid JSON."
     else:
         json_error = None
@@ -292,6 +362,24 @@ def kpi_card(title: str, value: str, chip_label: str, tone: str, detail: str) ->
     )
 
 
+def render_error_card(title: str, result: dict[str, Any]) -> None:
+    st.markdown(
+        f"""
+        <div class="error-card">
+          <div class="card-title">{title}</div>
+          <div class="muted">The service did not respond cleanly.</div>
+          <div class="error-text">{result.get("error") or "Unknown error"}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def approval_card(approval: dict[str, Any]) -> None:
+    approval_id = str(approval.get("approval_id", "unknown"))
+    action = str(approval.get("requested_action", "unknown"))
+    status = str(approval.get("status", "pending"))
+    target_model = approval.get("target_model_version") or "not specified"
 def session_defaults() -> None:
     """Initialize state keys used to persist action feedback across reruns."""
 
@@ -332,6 +420,21 @@ def render_approval_card(approval: dict[str, Any]) -> None:
     st.markdown(
         f"""
         <div class="approval-card">
+          <div class="approval-topline">
+            <div>
+              <div class="eyebrow">Requested Action</div>
+              <div class="approval-action">{action}</div>
+            </div>
+            <div>{status_chip(status, "pending" if status == "pending" else "warning")}</div>
+          </div>
+          <div class="approval-grid">
+            <div><span>Approval</span><b>{approval_id}</b></div>
+            <div><span>Investigation</span><b>{approval.get("investigation_id", "-")}</b></div>
+            <div><span>Drift Event</span><b>{approval.get("drift_event_id", "-")}</b></div>
+            <div><span>Target Model</span><b>{target_model}</b></div>
+            <div><span>Requested By</span><b>{approval.get("requested_by", "-")}</b></div>
+            <div><span>Created</span><b>{approval.get("created_at", "-")}</b></div>
+          </div>
             <div class="approval-head">
                 <div>
                     <div class="approval-action">{escape(action.replace("_", " "))}</div>
@@ -359,6 +462,10 @@ def render_approval_card(approval: dict[str, Any]) -> None:
     )
     reason = st.text_area(
         "Reason",
+        placeholder="Optional reviewer note",
+        key=f"reason_{approval_id}",
+    )
+    approve_col, reject_col = st.columns(2)
         value="",
         placeholder="Optional note for the audit trail",
         key=f"reason_{approval_id}",
@@ -370,6 +477,10 @@ def render_approval_card(approval: dict[str, Any]) -> None:
             result = post_json(
                 f"{AGENT_BASE_URL}/hil/{approval_id}/approve",
                 {"approved_by": approved_by, "reason": reason or None},
+            )
+            st.session_state.last_action_message = (
+                "success",
+                f"Approved {approval_id}" if result["ok"] else f"Approve failed: {result['error']}",
             )
             if result["ok"]:
                 st.session_state["last_action_message"] = {
@@ -388,6 +499,158 @@ def render_approval_card(approval: dict[str, Any]) -> None:
                 f"{AGENT_BASE_URL}/hil/{approval_id}/reject",
                 {"approved_by": approved_by, "reason": reason or None},
             )
+            st.session_state.last_action_message = (
+                "success",
+                f"Rejected {approval_id}" if result["ok"] else f"Reject failed: {result['error']}",
+            )
+            st.rerun()
+
+
+st.markdown(
+    """
+    <style>
+    .block-container { padding-top: 2rem; padding-bottom: 3rem; }
+    .hero { padding: 1.4rem 1.6rem; border-radius: 24px; background:
+      radial-gradient(circle at top left, rgba(39, 116, 255, .20), transparent 32%),
+      linear-gradient(135deg, #0d1b2a 0%, #14213d 48%, #1d3557 100%);
+      color: white; margin-bottom: 1.4rem; box-shadow: 0 22px 55px rgba(13, 27, 42, .20); }
+    .hero h1 { margin: 0; font-size: 2.7rem; letter-spacing: -0.04em; }
+    .hero p { margin: .4rem 0 0; color: #d8e2f0; font-size: 1.05rem; }
+    .kpi-card, .approval-card, .ops-card, .error-card {
+      border: 1px solid rgba(15, 23, 42, .08); border-radius: 20px; padding: 1.05rem;
+      background: rgba(255,255,255,.92); box-shadow: 0 12px 30px rgba(15,23,42,.07);
+      margin-bottom: .9rem; }
+    .kpi-title, .eyebrow { color: #64748b; font-size: .75rem; text-transform: uppercase; letter-spacing: .10em; font-weight: 800; }
+    .kpi-value { color: #0f172a; font-size: 1.65rem; font-weight: 850; letter-spacing: -.03em; margin: .35rem 0; }
+    .kpi-note, .muted { color: #64748b; font-size: .86rem; margin-top: .45rem; }
+    .chip { display: inline-block; padding: .28rem .65rem; border-radius: 999px; font-size: .78rem; font-weight: 800; }
+    .chip-success, .chip-healthy { color: #065f46; background: #d1fae5; }
+    .chip-warning, .chip-pending { color: #92400e; background: #fef3c7; }
+    .chip-failed, .chip-offline { color: #991b1b; background: #fee2e2; }
+    .approval-topline { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+    .approval-action { color: #0f172a; font-size: 1.35rem; font-weight: 850; margin-top: .2rem; }
+    .approval-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin-top: 1rem; }
+    .approval-grid span { display: block; color: #64748b; font-size: .78rem; }
+    .approval-grid b { display: block; color: #0f172a; font-size: .9rem; overflow-wrap: anywhere; }
+    .error-card { border-color: rgba(220,38,38,.20); background: #fff7f7; }
+    .error-text { color: #991b1b; margin-top: .45rem; overflow-wrap: anywhere; }
+    .help-note { padding: .9rem 1rem; background: #eef6ff; color: #1e3a8a; border-radius: 16px; border: 1px solid #bfdbfe; margin-bottom: 1rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+if "last_drift_result" not in st.session_state:
+    st.session_state.last_drift_result = None
+if "last_action_message" not in st.session_state:
+    st.session_state.last_action_message = None
+
+
+platform_health = check_service_health(PLATFORM_BASE_URL)
+agent_health = check_service_health(AGENT_BASE_URL)
+pending_result = get_json(f"{AGENT_BASE_URL}/hil/pending", timeout=5)
+approvals = extract_pending_approvals(pending_result)
+drift_label, drift_kind = drift_summary(st.session_state.last_drift_result)
+
+
+st.markdown(
+    """
+    <div class="hero">
+      <h1>Drift Triage Co-Pilot</h1>
+      <p>Monitor drift, review approvals, and coordinate response actions.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    '<div class="help-note">Replay/retrain jobs are queued for the worker. '
+    "Production-changing actions require HIL approval.</div>",
+    unsafe_allow_html=True,
+)
+
+if st.session_state.last_action_message:
+    level, message = st.session_state.last_action_message
+    if level == "success":
+        st.success(message)
+    else:
+        st.error(message)
+
+kpi_cols = st.columns(4)
+with kpi_cols[0]:
+    render_card(
+        "Platform Status",
+        "Online" if platform_health["ok"] else "Offline",
+        "healthy" if platform_health["ok"] else "offline",
+        "healthy" if platform_health["ok"] else "offline",
+        PLATFORM_BASE_URL,
+    )
+with kpi_cols[1]:
+    render_card(
+        "Agent Status",
+        "Online" if agent_health["ok"] else "Offline",
+        "healthy" if agent_health["ok"] else "offline",
+        "healthy" if agent_health["ok"] else "offline",
+        AGENT_BASE_URL,
+    )
+with kpi_cols[2]:
+    render_card(
+        "Pending Approvals",
+        str(len(approvals)) if pending_result["ok"] else "Unknown",
+        "pending" if approvals else ("healthy" if pending_result["ok"] else "offline"),
+        "pending" if approvals else ("healthy" if pending_result["ok"] else "offline"),
+        "HIL inbox",
+    )
+with kpi_cols[3]:
+    render_card("Last Drift Report", drift_label, drift_label.lower(), drift_kind, "Platform webhook")
+
+
+left, right = st.columns([1.65, 1], gap="large")
+
+with left:
+    st.subheader("HIL Approval Inbox")
+    if not pending_result["ok"]:
+        render_error_card("Pending approvals unavailable", pending_result)
+    elif not approvals:
+        st.info("No pending approvals right now.")
+    else:
+        for item in approvals:
+            approval_card(item)
+
+    with st.expander("Raw pending approvals response"):
+        st.json(pending_result)
+
+with right:
+    st.subheader("Operations")
+    st.markdown('<div class="ops-card">', unsafe_allow_html=True)
+    if st.button("Run Drift Report", use_container_width=True):
+        st.session_state.last_drift_result = get_json(f"{PLATFORM_BASE_URL}/drift/report", timeout=20)
+        st.rerun()
+    if st.button("Refresh approvals", use_container_width=True):
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    drift_result = st.session_state.last_drift_result
+    if drift_result:
+        if drift_result["ok"]:
+            data = drift_result.get("data") if isinstance(drift_result.get("data"), dict) else {}
+            st.markdown('<div class="ops-card">', unsafe_allow_html=True)
+            st.markdown("**Last drift report**")
+            st.write("Webhook sent:", data.get("webhook_sent", "unknown"))
+            st.write("Severity:", data.get("severity", data.get("report", {}).get("severity", "unknown")))
+            summary = data.get("summary") or data.get("message") or data.get("webhook_error")
+            if summary:
+                st.caption(str(summary))
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            render_error_card("Drift report failed", drift_result)
+
+    st.markdown(
+        """
+        <div class="ops-card">
+          <div class="card-title"><b>Queue Visibility</b></div>
+          <div class="muted">Queue visibility will be connected after worker status endpoint is available.</div>
             if result["ok"]:
                 st.session_state["last_action_message"] = {
                     "tone": "success",
@@ -488,6 +751,11 @@ def render_dashboard() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    with st.expander("Health check details"):
+        st.json({"platform": platform_health, "agent": agent_health})
+    with st.expander("Raw drift report response"):
+        st.json(st.session_state.last_drift_result or {})
     st.markdown(
         """
         <div class="note">

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agent.app.config.settings import get_settings
 from agent.app.graph.state import AgentState
 from agent.app.llm.client import complete_json
 
@@ -16,29 +17,34 @@ def run_triage(state: AgentState) -> AgentState:
         "critical": "Critical drift detected. Retraining candidate should be considered.",
     }
     fallback = {"triage_summary": summary_map[severity]}
-    try:
-        llm_result = complete_json(
-            system_prompt=(
-                "Summarize the drift alert for an ML operations triage dashboard. "
-                "Do not recommend production changes."
-            ),
-            user_payload={
-                "severity": severity,
-                "model_name": state["drift_alert"].model_name,
-                "numeric_drift": [item.model_dump() for item in state["drift_alert"].numeric_drift],
-                "categorical_drift": [
-                    item.model_dump() for item in state["drift_alert"].categorical_drift
-                ],
-                "output_drift": (
-                    state["drift_alert"].output_drift.model_dump()
-                    if state["drift_alert"].output_drift
-                    else None
-                ),
-            },
-            fallback=fallback,
-        )
-    except RuntimeError:
+    if severity == "stable" or get_settings().LLM_PROVIDER.lower().strip() == "mock":
         llm_result = fallback
+    else:
+        try:
+            llm_result = complete_json(
+                system_prompt=(
+                    "Summarize the drift alert for an ML operations triage dashboard. "
+                    "Do not recommend production changes."
+                ),
+                user_payload={
+                    "severity": severity,
+                    "model_name": state["drift_alert"].model_name,
+                    "numeric_drift": [
+                        item.model_dump() for item in state["drift_alert"].numeric_drift
+                    ],
+                    "categorical_drift": [
+                        item.model_dump() for item in state["drift_alert"].categorical_drift
+                    ],
+                    "output_drift": (
+                        state["drift_alert"].output_drift.model_dump()
+                        if state["drift_alert"].output_drift
+                        else None
+                    ),
+                },
+                fallback=fallback,
+            )
+        except RuntimeError:
+            llm_result = fallback
 
     updated = dict(state)
     updated["severity"] = severity
