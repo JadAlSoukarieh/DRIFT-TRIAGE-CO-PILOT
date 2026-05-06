@@ -4,7 +4,20 @@ All env vars read from .env file. extra="forbid" — unknown vars rejected.
 No scattered os.getenv() anywhere else in the codebase.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+PLATFORM_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = PLATFORM_ROOT.parent
+
+
+def _resolve_platform_path(path_value: str) -> Path:
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    return PLATFORM_ROOT / path
 
 
 class Settings(BaseSettings):
@@ -25,3 +38,17 @@ class Settings(BaseSettings):
     drift_window_size: int = 500
     drift_severity_moderate: float = 0.10
     drift_severity_critical: float = 0.25
+
+    def resolved_model_path(self) -> Path:
+        return _resolve_platform_path(self.model_path)
+
+    def resolved_dataset_path(self) -> Path:
+        configured = _resolve_platform_path(self.dataset_path)
+        if configured.exists():
+            return configured
+
+        fallback = REPO_ROOT / "initial-training" / "dataset" / "bank-additional-full.csv"
+        if fallback.exists():
+            return fallback
+
+        return configured

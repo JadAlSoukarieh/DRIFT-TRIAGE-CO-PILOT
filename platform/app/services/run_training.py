@@ -97,7 +97,7 @@ def compute_dataset_sha256(csv_path: str) -> str:
 def run_training_pipeline(dataset_path: str | None = None) -> str:
     settings = Settings()
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
-    ds_path = dataset_path or settings.dataset_path
+    ds_path = Path(dataset_path) if dataset_path else settings.resolved_dataset_path()
 
     df, y = load_and_clean(ds_path)
     print(f"Loaded {df.shape[0]} rows, {df.shape[1]} features. Positive: {y.mean():.2%}")
@@ -266,7 +266,7 @@ def run_training_pipeline(dataset_path: str | None = None) -> str:
         print(f"Artifacts: model/  schema.json  model_card.json")
 
     # Save to disk
-    joblib_path = Path(settings.model_path)
+    joblib_path = settings.resolved_model_path()
     joblib_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(pipeline, joblib_path)
     print(f"Model saved to {joblib_path.resolve()}")
