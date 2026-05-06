@@ -1,6 +1,8 @@
 """API contract tests — structured errors, valid responses, no stack traces."""
 
-import pytest
+import asyncio
+
+import httpx
 
 
 def test_health(test_client):
@@ -69,10 +71,48 @@ def test_openapi_schema(test_client):
 
 
 def test_drift_report_endpoint(test_client):
-    """GET /drift/report returns 200 with report and webhook_sent fields."""
-    response = test_client.get("/drift/report")
+    """GET /drift/report returns webhook_sent true when the agent accepts the payload."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True})
+
+    mock_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    original_client = test_client.app.state.http_client
+    test_client.app.state.http_client = mock_client
+
+    try:
+        response = test_client.get("/drift/report")
+    finally:
+        test_client.app.state.http_client = original_client
+        asyncio.run(mock_client.aclose())
+
     assert response.status_code == 200
     data = response.json()
     assert "report" in data
     assert "webhook_sent" in data
+    assert "webhook_error" in data
     assert data["report"]["severity"] == "stable"
+    assert data["webhook_sent"] is True
+    assert data["webhook_error"] is None
+
+
+def test_drift_report_endpoint_webhook_failure_sets_error(test_client):
+    """GET /drift/report returns webhook_sent false and a useful error on agent failure."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": "schema mismatch"})
+
+    mock_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    original_client = test_client.app.state.http_client
+    test_client.app.state.http_client = mock_client
+
+    try:
+        response = test_client.get("/drift/report")
+    finally:
+        test_client.app.state.http_client = original_client
+        asyncio.run(mock_client.aclose())
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["webhook_sent"] is False
+    assert "422" in data["webhook_error"]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent.app.tools.queue_client import enqueue_job
+from agent.app.tools.queue_client import build_idempotency_key, enqueue_job
 
 
 async def dispatch_rollback(
@@ -17,7 +17,7 @@ async def dispatch_rollback(
     if not approval_id:
         raise ValueError("approval_id is required for rollback dispatch.")
 
-    idempotency_key = f"rollback:{investigation_id}:{target_model_version}"
+    idempotency_key = build_idempotency_key("rollback", investigation_id, target_model_version)
     payload = {
         "investigation_id": investigation_id,
         "drift_event_id": drift_event_id,
