@@ -737,3 +737,27 @@ feature/agent-action-execution
 
 ### Next Safe Task
 Implement dashboard HIL inbox or run full platform -> agent -> Redis smoke test.
+
+### Integration Enabled
+- Dashboard can now list pending HIL approvals.
+- Human can approve/reject through agent HTTP API.
+- Approval state uses existing Postgres persistence service.
+- No Production change happens inside the HIL route itself.
+
+### Assumptions
+- Production-impacting actions will later require an approved HILAction.
+- HIL route only changes approval status.
+- Worker/platform promotion is triggered later by graph/tool logic.
+
+### Decisions Made
+- Invalid approval transitions return 409.
+- Missing approvals return 404.
+- HIL route does not directly promote or rollback models.
+
+### Do Not Touch
+- HILAction schema without coordination.
+- hil_approvals database schema without coordination.
+- approve/reject route paths without coordination.
+
+### Next Safe Task
+Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
