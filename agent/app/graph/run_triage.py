@@ -5,6 +5,7 @@ from __future__ import annotations
 from agent.app.config.settings import get_settings
 from agent.app.graph.state import AgentState
 from agent.app.llm.client import complete_json
+from agent.app.llm.models import TriageOutput
 
 
 def run_triage(state: AgentState) -> AgentState:
@@ -42,6 +43,7 @@ def run_triage(state: AgentState) -> AgentState:
                     ),
                 },
                 fallback=fallback,
+                output_model=TriageOutput,
             )
         except RuntimeError:
             llm_result = fallback

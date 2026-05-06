@@ -27,6 +27,23 @@ def _build_test_app():
     app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
     app.state.model = None
     app.state.threshold = app.state.settings.threshold
+    app.state.drift_accumulator = [
+        {
+            "age": 40, "job": "admin.", "marital": "married",
+            "education": "university.degree", "default": "no",
+            "housing": "yes", "loan": "no", "contact": "cellular",
+            "month": "may", "day_of_week": "mon", "campaign": 1,
+            "pdays": (999 if i < 50 else 0),
+            "previous": 0, "poutcome": "nonexistent",
+            "emp.var.rate": (1.1 if i < 50 else -2.0),
+            "cons.price.idx": 93.994,
+            "cons.conf.idx": -36.4,
+            "euribor3m": (4.8 if i < 50 else 2.0),
+            "nr.employed": 5191, "proba": (0.2 if i < 50 else 0.8),
+        }
+        for i in range(100)
+    ]
+    app.state.last_severity = "stable"
 
     app.include_router(drift.router, prefix="/drift", tags=["drift"])
     app.include_router(queue.router, prefix="/queue", tags=["queue"])
@@ -40,6 +57,7 @@ _TEST_APP = _build_test_app()
 @pytest.fixture
 def test_client() -> TestClient:
     """TestClient that works without model.joblib. Predict tests use predict_client in test_predict_api.py."""
+    _TEST_APP.state.last_severity = "stable"
     with TestClient(_TEST_APP) as client:
         yield client
 
@@ -81,7 +99,7 @@ def test_drift_report_endpoint(test_client):
     data = response.json()
     assert "report" in data
     assert "webhook_sent" in data
-    assert data["report"]["severity"] == "stable"
+    assert data["report"]["severity"] == "critical"
     assert data["webhook_sent"] is True
 
 
@@ -118,22 +136,29 @@ def test_queue_status_redis_failure(test_client):
     assert "Redis unavailable" in data["worker_note"]
 
 
-def test_registry_status_ok(test_client):
-    """GET /registry/status returns model name and version info."""
-    import socket
-    s = socket.socket()
-    try:
-        s.settimeout(1)
-        s.connect(("localhost", 5000))
-        s.close()
-    except Exception:
-        s.close()
-        pytest.skip("MLflow server not running — skipping registry status test")
+def test_registry_status_ok(test_client, monkeypatch):
+    """GET /registry/status returns model name and version info without live MLflow."""
+
+    class FakeModelVersion:
+        version = "1"
+        last_updated_timestamp = None
+
+    class FakeMlflowClient:
+        def get_model_version_by_alias(self, name, alias):
+            if alias == "candidate":
+                return FakeModelVersion()
+            raise RuntimeError("Production alias not set")
+
+    monkeypatch.setattr(registry.mlflow, "set_tracking_uri", lambda uri: None)
+    monkeypatch.setattr(registry, "MlflowClient", FakeMlflowClient)
+
     response = test_client.get("/registry/status")
     assert response.status_code == 200
     data = response.json()
     assert "registered_model_name" in data
     assert data["registered_model_name"] == "bank_marketing_pipeline"
+    assert data["candidate_version"] == "1"
+    assert data["production_version"] is None
     assert "status" in data
 
 

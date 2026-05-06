@@ -5,6 +5,7 @@ from __future__ import annotations
 from agent.app.config.settings import get_settings
 from agent.app.graph.state import AgentState
 from agent.app.llm.client import complete_json
+from agent.app.llm.models import CommsOutput
 
 
 def run_comms(state: AgentState) -> AgentState:
@@ -48,6 +49,7 @@ def run_comms(state: AgentState) -> AgentState:
                     "dispatch_error": state["dispatch_error"],
                 },
                 fallback=fallback,
+                output_model=CommsOutput,
             )
         except RuntimeError:
             llm_result = fallback
