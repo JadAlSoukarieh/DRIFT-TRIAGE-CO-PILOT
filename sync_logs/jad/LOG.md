@@ -667,6 +667,67 @@ feature/agent-hil-routes
 ### Next Safe Task
 Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
 
+## 2026-05-06 - Jad / Codex
+
+### Goal
+Verified Hadi Phase 1 merge, fixed a brittle platform registry test that was touching live MLflow, wired dashboard to queue and registry endpoints, and filled agent/infra docs.
+
+### Branch
+feature/dashboard-queue-registry-docs
+
+### Files Changed
+- `ARCH.md`
+- `DECISIONS.md`
+- `dashboard/app.py`
+- `platform/tests/test_api.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git log --oneline --decorate -10`
+- `Test-Path platform/app/routers/queue.py`
+- `Test-Path platform/app/routers/registry.py`
+- `Test-Path platform/app/main.py`
+- `Test-Path worker/app/worker/consume_queue.py`
+- `Test-Path postgres/init.sql`
+- `Test-Path ARCH.md`
+- `Test-Path DECISIONS.md`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `cd platform && uv run pytest tests/ -v`
+- `docker compose config --quiet`
+- `python -m py_compile dashboard/app.py`
+- `.\.venv\Scripts\python.exe -m pytest tests\test_api.py::test_registry_status_ok -vv -s -p no:cacheprovider`
+- `.\.venv\Scripts\python.exe -m pytest tests -v -p no:cacheprovider`
+
+### Results
+- platform tests: `24 passed, 1 skipped`
+- agent tests: `54 passed`
+- dashboard compile: passed
+- docker compose config: passed
+- optional live endpoint checks: pending
+
+### Dashboard Updates
+- Queue status panel wired to `/queue/status`.
+- Registry status panel wired to `/registry/status`.
+- DLQ warning state added.
+- Candidate and Production registry display added.
+
+### Docs Updated
+- `ARCH.md` agent and infra sections.
+- `DECISIONS.md` agent and infra sections.
+- LangGraph checkpoint status documented honestly.
+- Azure/Kimi LLM behavior documented.
+
+### Assumptions
+- Hadi owns platform and worker endpoint implementation.
+- Dashboard only displays queue and registry state; it does not mutate it.
+- Production-changing actions remain gated by HIL.
+
+### Next Safe Task
+Full integration test with Hadi, then final RUNBOOK/demo/release prep.
+
 ## 2026-05-06 — Jad / Codex
 
 ### Goal
