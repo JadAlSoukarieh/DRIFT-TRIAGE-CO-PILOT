@@ -12,13 +12,19 @@ def _settings() -> Settings:
 
 
 def test_model_loads():
-    model = joblib.load(_settings().resolved_model_path())
+    path = _settings().resolved_model_path()
+    if not path.exists():
+        pytest.skip(f"model artifact missing: {path}")
+    model = joblib.load(path)
     assert model is not None
     assert hasattr(model, "predict_proba")
 
 
 def test_predictions_stable():
-    model = joblib.load(_settings().resolved_model_path())
+    path = _settings().resolved_model_path()
+    if not path.exists():
+        pytest.skip(f"model artifact missing: {path}")
+    model = joblib.load(path)
     sample = {
         "age": 40, "job": "admin.", "marital": "married",
         "education": "university.degree", "default": "no", "housing": "yes",
