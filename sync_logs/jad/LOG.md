@@ -663,3 +663,65 @@ Created temporary integration branch and tested latest platform main with unmerg
 
 ### Next Safe Task
 fix webhook contract mismatch
+
+---
+
+## 2026-05-05 - Jad / Codex
+
+### Goal
+Fixed the platform -> agent webhook payload contract and aligned the agent/worker queue contract.
+
+### Files Changed
+- `contracts/webhook_v1.json`
+- `platform/app/config/settings.py`
+- `platform/app/routers/drift.py`
+- `platform/tests/test_api.py`
+- `platform/tests/test_drift.py`
+- `agent/app/tools/queue_client.py`
+- `agent/app/tools/dispatch_replay.py`
+- `agent/app/tools/dispatch_retrain.py`
+- `agent/app/tools/dispatch_rollback.py`
+- `agent/tests/test_dispatch_tools.py`
+- `worker/app/worker/consume_queue.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `Get-Content contracts/webhook_v1.json`
+- `Get-Content contracts/promote_v1.json`
+- `Get-Content agent/app/schemas/drift_alert.py`
+- `Get-Content platform/app/schemas/drift_report.py`
+- `Get-Content platform/app/routers/drift.py`
+- `Get-Content agent/app/tools/queue_client.py`
+- `Get-Content agent/app/tools/dispatch_replay.py`
+- `Get-Content agent/app/tools/dispatch_retrain.py`
+- `Get-Content agent/app/tools/dispatch_rollback.py`
+- `Get-Content worker/app/worker/consume_queue.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `Set-Location platform; & C:\Users\Jad\.local\bin\uv.exe run pytest tests/ -v`
+- `Set-Location platform; $env:PYTHONPATH=(Resolve-Path '.\.venv\Lib\site-packages').Path; & 'C:\Users\Jad\AppData\Local\Temp\uv-python\cpython-3.12.13-windows-x86_64-none\python.exe' -m pytest tests -v -p no:cacheprovider`
+- local live smoke: started agent and platform locally, then called `GET /drift/report`
+
+### Tests
+- Agent tests: passed (`Ran 28 tests`, `OK`).
+- Platform tests: `uv run` failed because local uv cache initialization is blocked in `AppData`; fallback platform test run passed (`21 passed, 1 skipped`).
+- Live platform -> agent smoke: passed; `/drift/report` returned `"webhook_sent": true` and agent logged `POST /webhook/drift ... 200 OK`.
+
+### Webhook Contract Fix Result
+- Platform now converts `DriftReport` to a DriftAlert-compatible webhook payload before POSTing to the agent.
+- `contracts/webhook_v1.json` now matches the agent DriftAlert shape.
+- Platform tests include:
+  - emitted payload validates against `agent.app.schemas.drift_alert.DriftAlert`
+  - `/drift/report` returns `webhook_sent=true` when mock agent returns `200`
+  - `/drift/report` returns `webhook_sent=false` with a useful error when mock agent returns `422`
+
+### Queue Contract Fix Result
+- Agent queue name now matches worker: `drift-triage-jobs`
+- Agent payload now uses top-level `action` and top-level job fields instead of nested `payload`
+- Shared idempotency format is now `idempotency:{action}:{investigation_id}:{target_or_event}`
+- Worker accepts the canonical `replay_test` action and still normalizes legacy `replay`
+- Agent tests verify a worker-parsed agent-created payload
+
+### Remaining Blockers
+- `uv` is installed locally but not on PATH in this shell.
+- `uv run` is blocked locally by uv cache/AppData permissions, so platform tests still need the Python 3.12 fallback on this machine.
+- Old temporary integration logs under `reports/` are still untracked local artifacts.

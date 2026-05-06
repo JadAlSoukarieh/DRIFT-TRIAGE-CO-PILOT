@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent.app.tools.queue_client import enqueue_job
+from agent.app.tools.queue_client import build_idempotency_key, enqueue_job
 
 
 async def dispatch_replay_test(
@@ -14,8 +14,11 @@ async def dispatch_replay_test(
 ) -> dict:
     """Queue a replay-test job without executing the replay locally."""
 
-    idempotency_key = (
-        f"replay_test:{investigation_id}:{model_version or model_uri or drift_event_id}"
+    target_or_event = model_version or model_uri or drift_event_id
+    idempotency_key = build_idempotency_key(
+        "replay_test",
+        investigation_id,
+        str(target_or_event),
     )
     payload = {
         "investigation_id": investigation_id,
