@@ -738,6 +738,71 @@ feature/agent-action-execution
 ### Next Safe Task
 Implement dashboard HIL inbox or run full platform -> agent -> Redis smoke test.
 
+---
+
+## 2026-05-06 - Jad / Codex
+
+### Goal
+Verified latest main and implemented a polished Streamlit dashboard HIL Inbox and system status panel.
+
+### Branch
+feature/dashboard-hil-inbox
+
+### Files Changed
+- `dashboard/app.py`
+- `dashboard/pyproject.toml`
+- `dashboard/Dockerfile`
+- `dashboard/.dockerignore`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git log --oneline --decorate -5`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `cd platform && uv run pytest tests/ -v`
+- `cd platform && C:\Users\Jad\.local\bin\uv.exe run pytest tests/ -v`
+- `cd platform && python -m pytest tests -v -p no:cacheprovider` using the local uv-managed Python fallback
+- `docker compose config` with sanitized pass/fail reporting only
+- `git checkout -b feature/dashboard-hil-inbox`
+- `python -m py_compile dashboard/app.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `docker compose config` with sanitized pass/fail reporting only
+
+### Results
+- Agent tests: passed, `Ran 42 tests`, `OK`.
+- Platform tests: `uv` is not on PATH, direct `uv.exe` failed to initialize its local cache due AppData permissions, fallback Python run passed with `21 passed, 1 skipped`.
+- Dashboard syntax/import: `python -m py_compile dashboard/app.py` passed.
+- Docker compose config: passed; raw output was not recorded because it expands local `.env` values.
+
+### Dashboard Features
+- Polished command-center layout
+- Service health cards
+- Drift smoke panel
+- HIL pending approvals inbox
+- Approve/reject actions
+- Queue placeholder
+- Debug expanders
+
+### UX / Design Decisions
+- modern wide layout
+- card-based approval inbox
+- status chips/badges
+- raw JSON hidden in expanders
+- strong hierarchy and spacing
+- clean color accents
+- action feedback stored in `st.session_state` before rerun
+- stable approval widget keys based on `approval_id`
+
+### Blockers
+- `uv` is installed locally but not available on PATH in this shell.
+- Direct `uv.exe` is blocked by local AppData cache permissions.
+- Platform `.env` extra-key strictness remains a platform config risk if tests are run from a context that loads the repo-root `.env`; no platform code was changed in this branch.
+
+### Next Safe Task
+Run full local demo and then wire queue visibility / investigation history.
+
 ### Integration Enabled
 - Dashboard can now list pending HIL approvals.
 - Human can approve/reject through agent HTTP API.
