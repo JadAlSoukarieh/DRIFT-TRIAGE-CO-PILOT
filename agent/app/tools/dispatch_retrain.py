@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent.app.tools.queue_client import enqueue_job
+from agent.app.tools.queue_client import build_idempotency_key, enqueue_job
 
 
 async def dispatch_retrain(
@@ -13,7 +13,7 @@ async def dispatch_retrain(
 ) -> dict:
     """Queue a retrain job that produces a candidate model only."""
 
-    idempotency_key = f"retrain:{investigation_id}:{drift_event_id}"
+    idempotency_key = build_idempotency_key("retrain", investigation_id, drift_event_id)
     payload = {
         "investigation_id": investigation_id,
         "drift_event_id": drift_event_id,

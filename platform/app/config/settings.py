@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # Default: Docker service name. Override via .env to http://localhost:5000 for local dev.
     mlflow_tracking_uri: str = "http://mlflow:5000"
     agent_base_url: str = "http://agent:8001"
+    registered_model_name: str = "bank_marketing_pipeline"
     model_path: str = "data/model.joblib"
     dataset_path: str = "data/bank-additional-full.csv"
     threshold: float = 0.3493
