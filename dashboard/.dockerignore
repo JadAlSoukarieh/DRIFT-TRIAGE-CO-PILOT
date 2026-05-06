@@ -7,3 +7,13 @@ __pycache__
 reports
 test
 *.log
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.streamlit/secrets.toml
+reports/
+platform/.venv/
+platform/.pytest_cache/
+platform/tmp/
