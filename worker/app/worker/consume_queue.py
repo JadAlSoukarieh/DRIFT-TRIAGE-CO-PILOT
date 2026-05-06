@@ -29,6 +29,13 @@ try:
 except ImportError:  # pragma: no cover - local test environments may omit redis
     aioredis = None
 
+# In Docker, PYTHONPATH=/app makes the platform package importable.
+# For local testing: PYTHONPATH=.. uv run python -m worker_app.worker.consume_queue
+try:
+    from app.services.run_training import run_training_pipeline
+except ImportError:
+    run_training_pipeline = None  # type: ignore[assignment]
+
 try:
     import structlog
 except ImportError:  # pragma: no cover - local test environments may omit structlog
@@ -100,8 +107,8 @@ def build_idempotency_key(action: str, investigation_id: str, target_or_event: s
 
 
 async def handle_retrain(job: dict[str, Any]) -> None:
-    sys.path.insert(0, _platform_path())
-    from app.services.run_training import run_training_pipeline
+    if run_training_pipeline is None:
+        raise RuntimeError("run_training_pipeline is not available in this environment.")
 
     loop = asyncio.get_running_loop()
     model_uri = await loop.run_in_executor(

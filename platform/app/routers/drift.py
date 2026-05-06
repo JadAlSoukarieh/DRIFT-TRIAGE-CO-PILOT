@@ -104,6 +104,11 @@ async def emit_webhook(
             json=payload,
             timeout=10.0,
         )
+        response_data = None
+        try:
+            response_data = response.json()
+        except ValueError:
+            response_data = None
         if response.status_code == 200:
             try:
                 body = response.json()

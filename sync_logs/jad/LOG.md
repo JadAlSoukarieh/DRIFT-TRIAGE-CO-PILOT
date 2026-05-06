@@ -667,6 +667,224 @@ feature/agent-hil-routes
 ### Next Safe Task
 Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
 
+## 2026-05-06 — Jad / Codex
+
+### Goal
+Added real LangGraph StateGraph wrapper and optional Azure/Kimi LLM adapter while preserving mock deterministic mode.
+
+### Branch
+feature/langgraph-llm-wrapper
+
+### Files Changed
+- `.env.example`
+- `agent/app/config/settings.py`
+- `agent/app/graph/__init__.py`
+- `agent/app/graph/build_graph.py`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/run_triage.py`
+- `agent/app/llm/__init__.py`
+- `agent/app/llm/client.py`
+- `agent/app/llm/smoke_test.py`
+- `agent/pyproject.toml`
+- `agent/tests/test_langgraph_wrapper.py`
+- `agent/tests/test_llm_client.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -m py_compile agent/app/llm/client.py agent/app/llm/smoke_test.py`
+- `$env:LLM_PROVIDER='mock'; python -m agent.app.llm.smoke_test`
+- `$env:LLM_PROVIDER='azure'; python -m agent.app.llm.smoke_test`
+- `git status --short`
+
+### Results
+- Agent tests: passed, 53 tests OK.
+- LLM mock smoke: passed.
+- Optional Azure smoke: passed with local `.env` credentials; no secrets printed.
+- LangGraph wrapper: compiled and invoked by tests.
+
+### Integration Enabled
+- Agent graph now uses LangGraph StateGraph.
+- Existing deterministic behavior remains as fallback.
+- `LLM_PROVIDER=mock` works without API keys.
+- Azure/Kimi config is supported through env vars.
+- OpenAI-compatible Azure `/openai/v1` endpoints are supported.
+- No Production action can be triggered directly by LLM output.
+
+### Assumptions
+- `AZURE_STRONG_MODEL=Kimi-K2.6-1`
+- Real API keys live only in `.env` or local environment.
+- LLM calls are optional for demo.
+- Deterministic logic remains the safety baseline.
+
+### Decisions Made
+- Mock mode remains the default.
+- Azure config errors are raised only when an LLM call is attempted.
+- Azure smoke output is sanitized and does not print secrets.
+- Endpoint normalization handles the common duplicated `AZURE_OPENAI_ENDPOINT=` prefix.
+
+### Do Not Touch
+- API keys/secrets
+- Production action rules
+- webhook response schema
+- queue contract
+
+### Next Safe Task
+Run full local demo smoke, then Docker Compose hardening.
+
+## 2026-05-06 — Jad / Codex LangSmith Verification
+
+### Goal
+Verified live LangSmith tracing for the agent LangGraph flow without printing secrets.
+
+### Branch
+feature/langgraph-llm-wrapper
+
+### Files Changed
+- `agent/app/graph/build_graph.py`
+- `agent/tests/test_langgraph_wrapper.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "... run_investigation(...) ... wait_for_all_tracers()"`
+- `python -c "... Client(...).list_runs(...) ..."`
+
+### Results
+- Agent tests: passed, 54 tests OK with mock/no-tracing test isolation.
+- Live graph smoke: passed with Azure enabled.
+- LangSmith query: found recent runs for `LangGraph`, `triage`, `action`, `execute_action`, and `comms`.
+- Secrets were not printed.
+
+### Decisions Made
+- Pydantic `.env` LangSmith settings are bridged into process environment before graph compilation.
+- Unit tests force mock/no-tracing mode so local `.env` tracing does not slow or destabilize tests.
+
+### Next Safe Task
+Run full local demo smoke with agent, platform, dashboard, and Redis.
+
+## 2026-05-06 — Jad / Codex Full App Smoke Fix
+
+### Goal
+Made the local demo runnable end-to-end with dashboard, platform, agent, Redis, and Postgres persistence.
+
+### Branch
+feature/langgraph-llm-wrapper
+
+### Files Changed
+- `.env.example`
+- `.gitignore`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/run_triage.py`
+- `agent/app/services/request_approval.py`
+- `dashboard/.dockerignore`
+- `dashboard/Dockerfile`
+- `dashboard/app.py`
+- `dashboard/pyproject.toml`
+- `docker-compose.yml`
+- `sync_logs/jad/LOG.md`
+- `test/full_app_smoke_2026-05-06.md`
+
+### Commands Run
+- `python -m py_compile dashboard/app.py agent/app/graph/run_triage.py agent/app/graph/run_comms.py agent/app/services/request_approval.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `docker compose config`
+- `docker compose up -d postgres redis`
+- `Invoke-WebRequest http://127.0.0.1:8001/health`
+- `Invoke-WebRequest http://127.0.0.1:8001/hil/pending`
+- `Invoke-WebRequest http://127.0.0.1:8000/drift/report`
+- `Invoke-WebRequest http://127.0.0.1:8501`
+
+### Results
+- Agent tests: passed, 54 tests OK.
+- Dashboard syntax: passed.
+- Docker Compose config: passed.
+- Dashboard: HTTP 200 on `127.0.0.1:8501`.
+- Platform drift report: HTTP 200 with `webhook_sent: true`.
+- Direct critical webhook: queued `retrain` job on `drift-triage-jobs`.
+- HIL persistence: Postgres saved and returned a demo pending approval.
+
+### Fixes
+- Replaced placeholder dashboard with robust Streamlit HIL dashboard.
+- Fixed dashboard Docker dependencies and `.dockerignore`.
+- Wired Docker Compose service URLs for dashboard, platform, and agent.
+- Changed local Postgres host port to `55432` to avoid Windows host port conflict.
+- Stable drift bypasses Azure LLM so platform webhook does not timeout.
+- HIL persistence normalizes `postgresql+asyncpg://` DSNs for `asyncpg`.
+
+### Postgres Persistence
+- Postgres uses Docker named volume `pgdata`.
+- `postgres/init.sql` creates `investigations` and `hil_approvals`.
+- HIL approval inserted during smoke and returned by `/hil/pending`.
+
+### Next Safe Task
+Run the browser demo, then commit and push the runnable branch.
+
+---
+
+## 2026-05-06 - Jad / Codex
+
+### Goal
+Added real LangGraph StateGraph wrapper and optional Azure/Kimi LLM adapter while preserving mock deterministic mode.
+
+### Branch
+feature/langgraph-llm-wrapper
+
+### Files Changed
+- `.env.example`
+- `agent/pyproject.toml`
+- `agent/app/config/settings.py`
+- `agent/app/graph/__init__.py`
+- `agent/app/graph/build_graph.py`
+- `agent/app/graph/run_comms.py`
+- `agent/app/graph/run_triage.py`
+- `agent/app/llm/__init__.py`
+- `agent/app/llm/client.py`
+- `agent/app/llm/smoke_test.py`
+- `agent/tests/test_langgraph_wrapper.py`
+- `agent/tests/test_llm_client.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout feature/langgraph-llm-wrapper`
+- `git merge main`
+- `python -m pip install --user "langgraph>=0.2,<1"`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -m py_compile agent/app/llm/client.py agent/app/llm/smoke_test.py`
+- `python -m agent.app.llm.smoke_test`
+
+### Results
+- Agent tests: passed, `Ran 51 tests`, `OK`.
+- LLM mock smoke: passed.
+- Optional Azure smoke: skipped because Azure env vars are not set in this terminal.
+- LangSmith/LangGraph tracing placeholders added without storing real keys.
+
+### Integration Enabled
+- Agent graph now uses LangGraph StateGraph.
+- Existing deterministic behavior remains as fallback.
+- `LLM_PROVIDER=mock` works without API keys.
+- Azure/Kimi config is supported through env vars.
+- LangSmith/LangGraph tracing config is accepted through env vars.
+- No Production action can be triggered directly by LLM output.
+
+### Assumptions
+- `AZURE_STRONG_MODEL=Kimi-K2.6-1`
+- Real API keys live only in `.env` or local environment.
+- LLM calls are optional for demo.
+- Deterministic logic remains the safety baseline.
+
+### Do Not Touch
+- API keys/secrets
+- Production action rules
+- webhook response schema
+- queue contract
+
+### Next Safe Task
+Run optional Azure LLM smoke locally, then Docker Compose hardening.
+
 ---
 
 ## 2026-05-05 - Jad / Codex

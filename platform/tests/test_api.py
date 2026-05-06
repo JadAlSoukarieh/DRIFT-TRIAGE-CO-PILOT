@@ -91,9 +91,11 @@ def test_drift_report_endpoint(test_client):
     assert "report" in data
     assert "webhook_sent" in data
     assert "webhook_error" in data
+    assert "webhook_response" in data
     assert data["report"]["severity"] == "stable"
     assert data["webhook_sent"] is True
     assert data["webhook_error"] is None
+    assert data["webhook_response"] == {"ok": True}
 
 
 def test_drift_report_endpoint_webhook_failure_sets_error(test_client):
@@ -116,3 +118,4 @@ def test_drift_report_endpoint_webhook_failure_sets_error(test_client):
     data = response.json()
     assert data["webhook_sent"] is False
     assert "422" in data["webhook_error"]
+    assert data["webhook_response"] == {"detail": "schema mismatch"}

@@ -1,3 +1,5 @@
+name: drift-triage-copilot
+
 services:
   postgres:
     image: postgres:16
