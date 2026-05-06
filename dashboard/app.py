@@ -105,6 +105,32 @@ def drift_summary(result: dict[str, Any] | None) -> tuple[str, str]:
     return "Completed", "success"
 
 
+def queue_summary(result: dict[str, Any]) -> tuple[str, str, str]:
+    if not result.get("ok"):
+        return "Unavailable", "offline", result.get("error") or "Queue status unavailable."
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    if not data.get("redis_connected"):
+        return "Redis offline", "offline", str(data.get("worker_note", "Worker cannot consume jobs."))
+    dlq_length = data.get("dlq_length")
+    if isinstance(dlq_length, int) and dlq_length > 0:
+        return f"DLQ {dlq_length}", "warning", str(data.get("worker_note", "Worker is running with DLQ backlog."))
+    queue_length = data.get("queue_length")
+    return f"Queue {queue_length}", "healthy", str(data.get("worker_note", "Worker is polling normally."))
+
+
+def registry_summary(result: dict[str, Any]) -> tuple[str, str, str]:
+    if not result.get("ok"):
+        return "Unavailable", "offline", result.get("error") or "Registry status unavailable."
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    production = data.get("production_version")
+    candidate = data.get("candidate_version")
+    if production:
+        return f"Prod v{production}", "healthy", f"Candidate v{candidate}" if candidate else "No candidate version."
+    if candidate:
+        return f"Candidate v{candidate}", "warning", "No Production version yet."
+    return "No versions", "warning", "Registry reachable but no aliases are set."
+
+
 def render_card(title: str, value: str, chip_label: str, chip_kind: str, note: str = "") -> None:
     st.markdown(
         f"""
@@ -126,6 +152,37 @@ def render_error_card(title: str, result: dict[str, Any]) -> None:
           <div class="card-title">{title}</div>
           <div class="muted">The service did not respond cleanly.</div>
           <div class="error-text">{result.get("error") or "Unknown error"}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_state_panel(
+    title: str,
+    value: str,
+    chip_label: str,
+    chip_kind: str,
+    details: list[tuple[str, Any]],
+    note: str = "",
+) -> None:
+    rows = "".join(
+        f'<div class="state-row"><span>{label}</span><b>{value if value not in (None, "") else "-"}</b></div>'
+        for label, value in details
+    )
+    note_html = f'<div class="kpi-note">{note}</div>' if note else ""
+    st.markdown(
+        f"""
+        <div class="ops-card">
+          <div class="panel-topline">
+            <div>
+              <div class="eyebrow">{title}</div>
+              <div class="panel-value">{value}</div>
+            </div>
+            <div>{status_chip(chip_label, chip_kind)}</div>
+          </div>
+          <div class="state-grid">{rows}</div>
+          {note_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -218,6 +275,12 @@ st.markdown(
     .approval-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin-top: 1rem; }
     .approval-grid span { display: block; color: #64748b; font-size: .78rem; }
     .approval-grid b { display: block; color: #0f172a; font-size: .9rem; overflow-wrap: anywhere; }
+    .panel-topline { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+    .panel-value { color: #0f172a; font-size: 1.25rem; font-weight: 850; margin-top: .25rem; }
+    .state-grid { display: grid; grid-template-columns: 1fr; gap: .55rem; margin-top: .85rem; }
+    .state-row { display: flex; justify-content: space-between; gap: 1rem; padding: .55rem 0; border-top: 1px solid rgba(15,23,42,.08); }
+    .state-row span { color: #64748b; font-size: .85rem; }
+    .state-row b { color: #0f172a; font-size: .88rem; overflow-wrap: anywhere; text-align: right; }
     .error-card { border-color: rgba(220,38,38,.20); background: #fff7f7; }
     .error-text { color: #991b1b; margin-top: .45rem; overflow-wrap: anywhere; }
     .help-note { padding: .9rem 1rem; background: #eef6ff; color: #1e3a8a; border-radius: 16px; border: 1px solid #bfdbfe; margin-bottom: 1rem; }
@@ -236,8 +299,12 @@ if "last_action_message" not in st.session_state:
 platform_health = check_service_health(PLATFORM_BASE_URL)
 agent_health = check_service_health(AGENT_BASE_URL)
 pending_result = get_json(f"{AGENT_BASE_URL}/hil/pending", timeout=5)
+queue_result = get_json(f"{PLATFORM_BASE_URL}/queue/status", timeout=5)
+registry_result = get_json(f"{PLATFORM_BASE_URL}/registry/status", timeout=5)
 approvals = extract_pending_approvals(pending_result)
 drift_label, drift_kind = drift_summary(st.session_state.last_drift_result)
+queue_label, queue_kind, queue_note = queue_summary(queue_result)
+registry_label, registry_kind, registry_note = registry_summary(registry_result)
 
 
 st.markdown(
@@ -321,28 +388,65 @@ with right:
     if drift_result:
         if drift_result["ok"]:
             data = drift_result.get("data") if isinstance(drift_result.get("data"), dict) else {}
-            st.markdown('<div class="ops-card">', unsafe_allow_html=True)
-            st.markdown("**Last drift report**")
-            st.write("Webhook sent:", data.get("webhook_sent", "unknown"))
-            st.write("Severity:", data.get("severity", data.get("report", {}).get("severity", "unknown")))
+            render_state_panel(
+                "Last Drift Report",
+                "Webhook sent" if data.get("webhook_sent") is True else "Completed",
+                "success" if data.get("webhook_sent") is True else ("failed" if data.get("webhook_sent") is False else "warning"),
+                "success" if data.get("webhook_sent") is True else ("failed" if data.get("webhook_sent") is False else "warning"),
+                [
+                    ("Webhook sent", data.get("webhook_sent", "unknown")),
+                    ("Severity", data.get("severity", data.get("report", {}).get("severity", "unknown"))),
+                    ("Event", data.get("webhook_response", {}).get("drift_event_id") if isinstance(data.get("webhook_response"), dict) else None),
+                ],
+                note=str(data.get("summary") or data.get("message") or data.get("webhook_error") or ""),
+            )
             summary = data.get("summary") or data.get("message") or data.get("webhook_error")
-            if summary:
-                st.caption(str(summary))
-            st.markdown("</div>", unsafe_allow_html=True)
         else:
             render_error_card("Drift report failed", drift_result)
 
-    st.markdown(
-        """
-        <div class="ops-card">
-          <div class="card-title"><b>Queue Visibility</b></div>
-          <div class="muted">Queue visibility will be connected after worker status endpoint is available.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    if queue_result["ok"]:
+        queue_data = queue_result.get("data") if isinstance(queue_result.get("data"), dict) else {}
+        render_state_panel(
+            "Queue / Worker Status",
+            queue_label,
+            queue_label if queue_kind == "healthy" else ("warning" if queue_kind == "warning" else "offline"),
+            queue_kind,
+            [
+                ("Queue", queue_data.get("queue_name")),
+                ("Queued jobs", queue_data.get("queue_length")),
+                ("DLQ", queue_data.get("dlq_name")),
+                ("DLQ size", queue_data.get("dlq_length")),
+                ("Redis connected", queue_data.get("redis_connected")),
+            ],
+            note=queue_note,
+        )
+    else:
+        render_error_card("Queue / Worker Status unavailable", queue_result)
+
+    if registry_result["ok"]:
+        registry_data = registry_result.get("data") if isinstance(registry_result.get("data"), dict) else {}
+        render_state_panel(
+            "Registry / Model Status",
+            registry_label,
+            "healthy" if registry_kind == "healthy" else ("warning" if registry_kind == "warning" else "offline"),
+            registry_kind,
+            [
+                ("Registered model", registry_data.get("registered_model_name")),
+                ("Candidate", registry_data.get("candidate_version")),
+                ("Production", registry_data.get("production_version") or "No Production version yet"),
+                ("Last promotion", registry_data.get("last_promotion")),
+                ("Status", registry_data.get("status")),
+            ],
+            note=registry_note,
+        )
+    else:
+        render_error_card("Registry / Model Status unavailable", registry_result)
 
     with st.expander("Health check details"):
         st.json({"platform": platform_health, "agent": agent_health})
     with st.expander("Raw drift report response"):
         st.json(st.session_state.last_drift_result or {})
+    with st.expander("Raw queue status response"):
+        st.json(queue_result)
+    with st.expander("Raw registry status response"):
+        st.json(registry_result)
