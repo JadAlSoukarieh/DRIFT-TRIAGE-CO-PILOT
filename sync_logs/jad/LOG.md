@@ -600,3 +600,69 @@ feature/agent-webhook-graph-skeleton
 
 ### Next Safe Task
 Run platform -> agent webhook integration test, then wire optional Redis dispatch or implement HIL HTTP routes.
+
+---
+
+## 2026-05-05 - Jad / Codex
+
+### Goal
+Implemented HIL HTTP routes for pending approvals and approve/reject actions.
+
+### Branch
+feature/agent-hil-routes
+
+### Files Changed
+- `agent/app/routers/hil.py`
+- `agent/app/routers/__init__.py`
+- `agent/app/main.py`
+- `agent/tests/test_hil_routes.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout -b feature/agent-hil-routes`
+- `git merge feature/agent-webhook-graph-skeleton`
+- `Get-Content agent/app/main.py`
+- `Get-Content agent/app/routers/hil.py`
+- `Get-Content agent/app/routers/__init__.py`
+- `Get-Content agent/app/schemas/hil_action.py`
+- `Get-Content agent/app/services/request_approval.py`
+- `Get-Content agent/tests/test_request_approval.py`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `python -c "from agent.app.main import app; print([r.path for r in app.routes])"`
+
+### Results
+- Agent tests passed: `Ran 35 tests in 0.533s`, `OK`.
+- Import smoke passed and exposed the expected route list:
+  - `/webhook/drift`
+  - `/hil/pending`
+  - `/hil/{approval_id}`
+  - `/hil/{approval_id}/approve`
+  - `/hil/{approval_id}/reject`
+  - `/health`
+
+### Integration Enabled
+- Dashboard can now list pending HIL approvals.
+- Human can approve/reject through agent HTTP API.
+- Approval state uses existing Postgres persistence service.
+- No Production change happens inside the HIL route itself.
+
+### Assumptions
+- Production-impacting actions will later require an approved HILAction.
+- HIL route only changes approval status.
+- Worker/platform promotion is triggered later by graph/tool logic.
+
+### Decisions Made
+- Invalid approval transitions return 409.
+- Missing approvals return 404.
+- HIL route does not directly promote or rollback models.
+
+### Do Not Touch
+- HILAction schema without coordination.
+- hil_approvals database schema without coordination.
+- approve/reject route paths without coordination.
+
+### Next Safe Task
+Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
