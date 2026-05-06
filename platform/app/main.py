@@ -18,7 +18,7 @@ from fastapi import FastAPI
 
 from app.config.settings import Settings
 from app.dependencies import load_model
-from app.routers import drift, predict, registry
+from app.routers import drift, predict, queue, registry
 
 
 @asynccontextmanager
@@ -37,6 +37,7 @@ app = FastAPI(title="Drift Triage Platform", version="0.1.0", lifespan=lifespan)
 app.include_router(predict.router, prefix="/predict", tags=["predict"])
 app.include_router(drift.router, prefix="/drift", tags=["drift"])
 app.include_router(registry.router, prefix="/registry", tags=["registry"])
+app.include_router(queue.router, prefix="/queue", tags=["queue"])
 
 
 @app.get("/health")

@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # Default: Docker service name. Override via .env to http://localhost:5000 for local dev.
     mlflow_tracking_uri: str = "http://mlflow:5000"
     agent_base_url: str = "http://agent:8001"
+    redis_url: str = "redis://redis:6379/0"
+    postgres_dsn: str = "postgresql+asyncpg://user:pass@postgres:5432/drift"
     registered_model_name: str = "bank_marketing_pipeline"
     model_path: str = "data/model.joblib"
     dataset_path: str = "data/bank-additional-full.csv"
