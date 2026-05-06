@@ -169,6 +169,92 @@ Implement checkpoint manager and HIL approval persistence service.
 ## 2026-05-05 — Jad / Codex
 
 ### Goal
+Performed read-only platform/MLflow smoke check and implemented agent Redis dispatch tools.
+
+### Branch
+feature/agent-redis-dispatch
+
+### Files Changed
+- agent/app/tools/__init__.py
+- agent/app/tools/dispatch_replay.py
+- agent/app/tools/dispatch_retrain.py
+- agent/app/tools/dispatch_rollback.py
+- agent/app/tools/queue_client.py
+- agent/tests/test_dispatch_tools.py
+- agent/pyproject.toml
+- sync_logs/jad/LOG.md
+
+### Commands Run
+- `git status`
+- `git checkout main`
+- `git pull origin main`
+- `git checkout -b feature/agent-redis-dispatch`
+- `git checkout feature/agent-redis-dispatch`
+- `git merge main`
+- `git -c core.protectNTFS=false checkout main`
+- `git -c core.protectNTFS=false pull origin main`
+- `git -c core.protectNTFS=false checkout feature/agent-redis-dispatch`
+- `git -c core.protectNTFS=false merge origin/main`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `uv run pytest tests/ -v` (from `platform/`)
+- `Get-Content platform/app/config/settings.py`
+- `Get-Content platform/app/services/run_training.py`
+- `Get-Content platform/app/services/validate_promotion.py`
+- `Get-Content platform/app/routers/registry.py`
+- `Get-Content platform/app/routers/drift.py`
+- `Get-Content platform/app/dependencies.py`
+- `Get-Content platform/app/main.py`
+- `Get-Content sync_logs/hadi/LOG.md`
+- `Get-Content contracts/webhook_v1.json`
+- `Get-Content contracts/promote_v1.json`
+- `rg -n "candidate|alias|Production|production|Mlflow|MLflow|register|registered_model|set_registered_model_alias|transition_model_version_stage|emit_webhook|promote|validate|approve|threshold|webhook" platform sync_logs/hadi/LOG.md contracts -S`
+- `Get-Content agent/app/tools/__init__.py`
+- `Get-Content agent/app/tools/dispatch_replay.py`
+- `Get-Content agent/app/tools/dispatch_retrain.py`
+- `Get-Content agent/app/tools/dispatch_rollback.py`
+- `Get-Content agent/pyproject.toml`
+- `python - <<'PY' ... import redis / pydantic_settings / asyncpg ... PY`
+- `git status --short`
+- `git branch --show-current`
+
+### Results
+- Agent tests passed.
+- Platform tests failed to run in this environment because `uv` is not installed.
+- Redis dispatch tools implemented as enqueue-only helpers; no training, replay, rollback, or promotion execution happens inside the agent process.
+
+### Platform/MLflow Smoke Check
+- platform tests: fail in this environment. Command `uv run pytest tests/ -v` failed with `uv : The term 'uv' is not recognized as the name of a cmdlet...`
+- MLflow candidate alias: yes. `platform/app/services/run_training.py` sets alias `candidate`, and `platform/data/models/bank_marketing_pipeline/meta.yaml` shows `candidate: '1'`.
+- Production auto-set: no. `run_training.py` explicitly avoids Production and `sync_logs/hadi/LOG.md` says Production alias is intentionally absent.
+- promotion endpoint: yes, but minimal. `platform/app/routers/registry.py` implements `POST /registry/promote` and calls the promotion gate, but it returns success without any visible active-model switch in the inspected code.
+- drift webhook emitter: no. `platform/app/routers/drift.py` still only returns a placeholder report; no actual `emit_webhook()` implementation is present.
+- blockers: drift webhook emitter still missing, `contracts/webhook_v1.json` is much thinner than the richer agent drift schema, platform tests could not be rerun here because `uv` is missing, and the promotion route appears gate-only rather than performing an observable promotion side effect in the inspected code.
+
+### Assumptions
+- Redis worker will consume jobs from `ops_jobs`.
+- Redis idempotency set is `ops_job_idempotency_keys`.
+- Replay and retrain do not touch Production directly.
+- Rollback requires approval_id.
+
+### Decisions Made
+- Dispatch tools only enqueue jobs; worker executes them.
+- Retrain creates candidate only.
+- Rollback requires HIL approval_id.
+- Idempotency keys are stable and action-specific.
+
+### Do Not Touch
+- Redis queue key names without coordination.
+- idempotency key format without coordination.
+- HIL approval schema without coordination.
+
+### Next Safe Task
+Implement LangGraph graph skeleton or agent webhook router after dispatch tools pass tests.
+
+---
+
+## 2026-05-05 — Jad / Codex
+
+### Goal
 Implemented agent Postgres persistence foundation for investigations and HIL approvals.
 
 ### Branch
