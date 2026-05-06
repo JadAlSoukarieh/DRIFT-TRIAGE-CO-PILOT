@@ -1,0 +1,108 @@
+"""Tests for the LangGraph StateGraph wrapper."""
+
+from __future__ import annotations
+
+from unittest import IsolatedAsyncioTestCase
+from unittest.mock import AsyncMock, patch
+
+from agent.app.graph.build_graph import build_agent_graph, run_investigation
+from agent.app.schemas.drift_alert import DriftAlert
+
+
+def sample_alert(*, severity: str) -> DriftAlert:
+    return DriftAlert.model_validate(
+        {
+            "schema_version": "v1",
+            "event_id": f"drift-{severity}-001",
+            "created_at": "2026-05-05T12:00:00Z",
+            "model_name": "bank_marketing_pipeline",
+            "model_version": "1",
+            "model_alias": "candidate",
+            "severity": severity,
+            "window": {
+                "size": 200,
+                "start": "2026-05-05T11:00:00Z",
+                "end": "2026-05-05T12:00:00Z",
+            },
+            "numeric_drift": [
+                {
+                    "feature": "euribor3m",
+                    "psi": 0.31 if severity == "critical" else 0.12,
+                    "severity": severity,
+                }
+            ],
+            "categorical_drift": [],
+            "output_drift": {
+                "psi": 0.18 if severity == "critical" else 0.08,
+                "positive_rate_reference": 0.11,
+                "positive_rate_current": 0.22,
+                "severity": severity,
+            },
+        }
+    )
+
+
+class LangGraphWrapperTests(IsolatedAsyncioTestCase):
+    """Validate graph compilation and deterministic behavior in mock mode."""
+
+    def test_build_agent_graph_returns_invokable_graph(self) -> None:
+        graph = build_agent_graph()
+
+        self.assertTrue(callable(getattr(graph, "ainvoke", None)))
+
+    async def test_run_investigation_stable_in_mock_mode(self) -> None:
+        state = await run_investigation(sample_alert(severity="stable"))
+
+        self.assertEqual(state["recommended_action"], "none")
+        self.assertEqual(state["status"], "resolved")
+        self.assertFalse(state["requires_approval"])
+
+    async def test_run_investigation_moderate_in_mock_mode(self) -> None:
+        with patch(
+            "agent.app.graph.run_execute_action.dispatch_replay_test",
+            new=AsyncMock(
+                return_value={
+                    "job_id": "job-replay",
+                    "queued": True,
+                    "queue_name": "drift-triage-jobs",
+                }
+            ),
+        ):
+            state = await run_investigation(sample_alert(severity="moderate"))
+
+        self.assertEqual(state["recommended_action"], "replay_test")
+        self.assertEqual(state["status"], "queued")
+        self.assertEqual(state["job_id"], "job-replay")
+
+    async def test_run_investigation_critical_in_mock_mode(self) -> None:
+        with patch(
+            "agent.app.graph.run_execute_action.dispatch_retrain",
+            new=AsyncMock(
+                return_value={
+                    "job_id": "job-retrain",
+                    "queued": True,
+                    "queue_name": "drift-triage-jobs",
+                }
+            ),
+        ):
+            state = await run_investigation(sample_alert(severity="critical"))
+
+        self.assertEqual(state["recommended_action"], "retrain")
+        self.assertEqual(state["status"], "queued")
+        self.assertEqual(state["job_id"], "job-retrain")
+
+    async def test_llm_failure_falls_back_to_deterministic_summary(self) -> None:
+        with patch(
+            "agent.app.graph.run_triage.complete_json",
+            side_effect=RuntimeError("llm down"),
+        ):
+            state = await run_investigation(sample_alert(severity="stable"))
+
+        self.assertEqual(state["recommended_action"], "none")
+        self.assertIn("Received stable drift alert", state["comms_summary"])
+
+
+if __name__ == "__main__":
+    import unittest
+
+    unittest.main()
