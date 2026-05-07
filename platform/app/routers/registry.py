@@ -25,6 +25,7 @@ router = APIRouter()
 class RollbackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target_version: str
+    approval_id: str
     approved_by: str
 
 
@@ -136,6 +137,8 @@ async def promote(
     mlflow_client = MlflowClient()
 
     try:
+        await _write_audit_to_postgres(settings, body)
+
         mlflow_client.set_registered_model_alias(
             name=settings.registered_model_name,
             alias="Production",
@@ -150,8 +153,6 @@ async def promote(
         }
         logger = __import__("structlog").get_logger()
         logger.info("promotion_audit", **audit_row)
-
-        await _write_audit_to_postgres(settings, body)
 
     except Exception as exc:
         raise HTTPException(
@@ -174,6 +175,8 @@ async def rollback(
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     mlflow_client = MlflowClient()
 
+    approval = await _validate_rollback_approval(settings, body)
+
     try:
         mlflow_client.get_model_version(
             name=settings.registered_model_name,
@@ -186,20 +189,20 @@ async def rollback(
         )
 
     try:
+        await _write_rollback_audit(settings, body, approval)
+
         mlflow_client.set_registered_model_alias(
             name=settings.registered_model_name,
             alias="Production",
             version=body.target_version,
         )
-
         logger = __import__("structlog").get_logger()
         logger.info(
             "rollback_executed",
             target_version=body.target_version,
+            approval_id=body.approval_id,
             approved_by=body.approved_by,
         )
-
-        await _write_rollback_audit(settings, body)
 
     except Exception as exc:
         raise HTTPException(
@@ -242,32 +245,72 @@ async def registry_history(settings=Depends(get_settings)) -> dict:
 
 
 async def _write_audit_to_postgres(settings, body) -> None:
+    import asyncpg
+
+    conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
     try:
-        import asyncpg
-        dsn = _pg_dsn(settings)
-        conn = await asyncpg.connect(dsn, timeout=5)
         await conn.execute(
             "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias) "
             "VALUES ($1, $2, $3, $4, $5)",
             body.model_uri, body.investigation_id, body.approved_by,
             "candidate", "Production",
         )
+    finally:
         await conn.close()
-    except Exception:
-        pass
 
 
-async def _write_rollback_audit(settings, body: RollbackRequest) -> None:
+async def _write_rollback_audit(settings, body: RollbackRequest, approval: dict) -> None:
+    import asyncpg
+
+    conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
     try:
-        import asyncpg
-        dsn = _pg_dsn(settings)
-        conn = await asyncpg.connect(dsn, timeout=5)
         await conn.execute(
             "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias) "
             "VALUES ($1, $2, $3, $4, $5)",
-            body.target_version, "rollback", body.approved_by,
+            body.target_version, approval["investigation_id"], body.approved_by,
             "Production", "Production",
         )
+    finally:
         await conn.close()
-    except Exception:
-        pass
+
+
+async def _validate_rollback_approval(settings, body: RollbackRequest) -> dict:
+    if not body.approval_id:
+        raise HTTPException(
+            status_code=422,
+            detail="approval_id is required for rollback.",
+        )
+
+    try:
+        import asyncpg
+
+        conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
+        try:
+            row = await conn.fetchrow(
+                """SELECT approval_id, investigation_id, requested_action,
+                          target_model_version, status, approved_by
+                   FROM hil_approvals
+                   WHERE approval_id = $1""",
+                body.approval_id,
+            )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Rollback approval check failed: {exc}",
+        ) from exc
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Rollback approval not found.")
+    if row["status"] != "approved":
+        raise HTTPException(status_code=409, detail="Rollback approval is not approved.")
+    if row["requested_action"] != "rollback":
+        raise HTTPException(status_code=409, detail="Approval is not for rollback.")
+    if row["target_model_version"] and str(row["target_model_version"]) != str(body.target_version):
+        raise HTTPException(
+            status_code=409,
+            detail="Approval target version does not match rollback target.",
+        )
+
+    return dict(row)

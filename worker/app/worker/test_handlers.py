@@ -5,7 +5,7 @@ import sys
 import os
 
 WORKER_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../worker/app")
+    os.path.join(os.path.dirname(__file__), "..")
 )
 sys.path.insert(0, WORKER_PATH)
 

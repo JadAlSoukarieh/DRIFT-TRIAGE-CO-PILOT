@@ -1,0 +1,8 @@
+NAME                               IMAGE                            COMMAND                  SERVICE     CREATED          STATUS                    PORTS
+drift-triage-copilot-agent-1       drift-triage-copilot-agent       "uv run --project /a…"   agent       11 minutes ago   Up 11 minutes (healthy)   0.0.0.0:8001->8001/tcp, [::]:8001->8001/tcp
+drift-triage-copilot-dashboard-1   drift-triage-copilot-dashboard   "uv run streamlit ru…"   dashboard   11 minutes ago   Up 10 minutes (healthy)   0.0.0.0:8501->8501/tcp, [::]:8501->8501/tcp
+drift-triage-copilot-mlflow-1      drift-triage-copilot-mlflow      "mlflow server --hos…"   mlflow      11 minutes ago   Up 11 minutes (healthy)   0.0.0.0:5000->5000/tcp, [::]:5000->5000/tcp
+drift-triage-copilot-platform-1    drift-triage-copilot-platform    "uv run uvicorn app.…"   platform    11 minutes ago   Up 11 minutes (healthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+drift-triage-copilot-postgres-1    postgres:16                      "docker-entrypoint.s…"   postgres    27 minutes ago   Up 27 minutes (healthy)   0.0.0.0:55432->5432/tcp, [::]:55432->5432/tcp
+drift-triage-copilot-redis-1       redis:7-alpine                   "docker-entrypoint.s…"   redis       27 minutes ago   Up 27 minutes (healthy)   0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+drift-triage-copilot-worker-1      drift-triage-copilot-worker      "uv run python -m wo…"   worker      11 minutes ago   Up 10 minutes             
