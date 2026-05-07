@@ -31,11 +31,11 @@ All 8 services start with health checks. Open the dashboard at **http://localhos
                      │
          ┌───────────┼───────────┐
          │           │           │
-    ┌────┴────┐ ┌────┴────┐ ┌───┴──────┐
-    │ MLflow  │ │Postgres │ │  Redis   │
-    │  :5000  │ │ :5432   │ │  :6379   │
-    │Registry │ │HIL+Audit│ │Queue+DLQ │
-    └─────────┘ └─────────┘ └──────────┘
+    ┌────┴────┐ ┌────┴────┐  ┌───┴──────┐
+    │ MLflow  │ │Postgres │  │  Redis   │
+    │  :5000  │ │ :5432   │  │  :6379   │
+    │Registry │ │HIL+Audit│  │Queue+DLQ │
+    └─────────┘ └─────────┘  └──────────┘
 ```
 
 ## Services
