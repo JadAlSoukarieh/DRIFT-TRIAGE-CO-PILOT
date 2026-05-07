@@ -20,6 +20,7 @@ from agent.app.graph.run_supervisor import supervisor_node
 from agent.app.graph.run_triage import run_triage
 from agent.app.graph.state import AgentState
 from agent.app.schemas.drift_alert import DriftAlert
+from agent.app.services.manage_checkpoints import create_checkpointer
 
 
 def _initial_state(drift_alert: DriftAlert) -> AgentState:
@@ -111,7 +112,12 @@ def build_agent_graph():
     graph.add_edge("execute_action", "supervisor")
     graph.add_edge("comms", "supervisor")
 
-    return graph.compile()
+    try:
+        checkpointer = create_checkpointer()
+    except Exception:
+        checkpointer = None
+
+    return graph.compile(checkpointer=checkpointer)
 
 
 async def run_investigation(drift_alert: DriftAlert) -> AgentState:
