@@ -58,6 +58,23 @@ def _predict(payload: dict) -> dict:
     except Exception:
         return {}
 
+
+def _mlflow_metrics() -> dict:
+    """Fetch latest MLflow run metrics via REST API."""
+    try:
+        url = f"{os.getenv('MLFLOW_BASE_URL', 'http://mlflow:5000')}/api/2.0/mlflow/runs/search"
+        resp = requests.post(url, json={
+            "experiment_ids": ["1"],
+            "max_results": 1,
+            "order_by": ["start_time DESC"],
+        }, timeout=5)
+        runs = resp.json().get("runs", [])
+        if runs:
+            return runs[0].get("data", {}).get("metrics", {})
+    except Exception:
+        pass
+    return {}
+
 # ── Session state ─────────────────────────────────────────────────────────────
 
 for key, default in [
@@ -166,16 +183,26 @@ with right:
                 st.caption(f"Target: `{a.get('target_model_version','?')}` | Status: `{a.get('status','?')}`")
                 st.caption(f"ID: `{a['approval_id'][:8]}...`")
 
-                # Show candidate metrics if available
+                # Candidate vs Production comparison with actual metrics
                 reg = _get(f"{PLATFORM}/registry/status")
-                if reg.get("candidate_version"):
-                    c1m, c2m, c3m = st.columns(3)
+                mlflow = _mlflow_metrics()
+                recall = mlflow.get("test_recall", 0)
+                f1 = mlflow.get("test_f1", 0)
+                auc = mlflow.get("test_roc_auc", 0)
+                threshold = mlflow.get("operating_threshold", 0)
+
+                if recall:
+                    c1m, c2m, c3m, c4m = st.columns(4)
                     with c1m:
-                        st.metric("Candidate", reg.get("candidate_version"))
+                        st.metric("Candidate", reg.get("candidate_version", "?") or "—")
                     with c2m:
-                        st.metric("Production", reg.get("production_version") or "none")
+                        st.metric("Recall", f"{recall:.3f}", delta=f">= 0.75: {'✅' if recall >= 0.75 else '❌'}")
                     with c3m:
-                        st.metric("Recall ≥ 0.75", "✅" if reg else "?")
+                        st.metric("F1", f"{f1:.3f}")
+                    with c4m:
+                        st.metric("AUC", f"{auc:.3f}")
+                    if threshold:
+                        st.caption(f"Operating threshold: {threshold:.4f}")
 
                 ac1, ac2 = st.columns(2)
                 with ac1:
@@ -205,14 +232,12 @@ st.divider()
 st.subheader("Registry Status")
 reg = _get(f"{PLATFORM}/registry/status")
 if reg:
-    r1, r2, r3, r4 = st.columns(4)
+    r1, r2, r3 = st.columns(3)
     with r1:
         st.metric("Model", reg.get("registered_model_name", "—"))
     with r2:
         st.metric("Production", reg.get("production_version") or "—")
     with r3:
-        st.metric("Candidate", reg.get("candidate_version") or "—")
-    with r4:
         st.metric("Status", reg.get("status", "—"))
 else:
     st.caption("Registry unavailable")
