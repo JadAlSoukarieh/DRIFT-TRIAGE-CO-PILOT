@@ -166,6 +166,17 @@ with right:
                 st.caption(f"Target: `{a.get('target_model_version','?')}` | Status: `{a.get('status','?')}`")
                 st.caption(f"ID: `{a['approval_id'][:8]}...`")
 
+                # Show candidate metrics if available
+                reg = _get(f"{PLATFORM}/registry/status")
+                if reg.get("candidate_version"):
+                    c1m, c2m, c3m = st.columns(3)
+                    with c1m:
+                        st.metric("Candidate", reg.get("candidate_version"))
+                    with c2m:
+                        st.metric("Production", reg.get("production_version") or "none")
+                    with c3m:
+                        st.metric("Recall ≥ 0.75", "✅" if reg else "?")
+
                 ac1, ac2 = st.columns(2)
                 with ac1:
                     approved_by = st.text_input("Approver", key=f"name_{a['approval_id']}")

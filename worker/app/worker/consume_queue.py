@@ -120,6 +120,7 @@ async def _notify_agent_candidate(
     investigation_id: str,
     drift_event_id: str,
     model_uri: str,
+    metrics: dict[str, float] | None = None,
 ) -> bool:
     """POST to agent to create a HIL approval for the new candidate."""
     if httpx is None:
@@ -136,6 +137,7 @@ async def _notify_agent_candidate(
                     "target_model_version": model_uri.split("/")[-1]
                     if model_uri
                     else None,
+                    "metrics": metrics or {},
                 },
             )
             if resp.status_code == 201:
@@ -162,7 +164,21 @@ async def handle_retrain(job: dict[str, Any]) -> None:
 
     investigation_id = job.get("investigation_id", "unknown")
     drift_event_id = job.get("drift_event_id", investigation_id)
-    await _notify_agent_candidate(investigation_id, drift_event_id, model_uri)
+
+    metrics: dict[str, float] = {}
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
+        client = mlflow.MlflowClient()
+        runs = client.search_runs(
+            experiment_ids=["1"], order_by=["start_time DESC"], max_results=1,
+        )
+        if runs:
+            metrics = dict(runs[0].data.metrics)
+    except Exception:
+        pass
+
+    await _notify_agent_candidate(investigation_id, drift_event_id, model_uri, metrics)
 
 
 async def handle_replay(job: dict[str, Any]) -> None:
