@@ -85,8 +85,6 @@ services:
       POSTGRES_DSN: ${POSTGRES_DSN:-postgresql+asyncpg://user:pass@postgres:5432/drift}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       PLATFORM_BASE_URL: ${PLATFORM_BASE_URL:-http://platform:8000}
-      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
-      LLM_MODEL: ${LLM_MODEL:-mock}
       LLM_API_KEY: ${LLM_API_KEY:-}
       AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
       AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
