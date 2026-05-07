@@ -137,3 +137,40 @@ async def reject_approval(
         status=updated.status,
         message="Approval rejected",
     )
+
+
+class NotifyCandidateBody(BaseModel):
+    """Payload from the worker after a new candidate model is trained."""
+    model_config = ConfigDict(extra="forbid")
+
+    investigation_id: str
+    drift_event_id: str
+    model_uri: str
+    target_model_version: str | None = None
+    metrics: dict[str, float] | None = None
+
+
+@router.post("/notify-candidate", status_code=201)
+async def notify_candidate_ready(body: NotifyCandidateBody) -> dict:
+    """Called by the worker when retrain completes."""
+    version = body.target_model_version or body.model_uri.split("/")[-1]
+
+    try:
+        approval = await request_approval.create_pending_approval(
+            investigation_id=body.investigation_id,
+            drift_event_id=body.drift_event_id,
+            requested_action="promote_candidate",
+            target_model_version=version,
+            requested_by="worker",
+            idempotency_key=f"worker:{body.investigation_id}:{version}",
+        )
+    except RuntimeError as exc:
+        raise _service_unavailable(str(exc)) from exc
+
+    return {
+        "approval_id": approval.approval_id,
+        "status": approval.status,
+        "model_uri": body.model_uri,
+        "metrics": body.metrics or {},
+        "message": "HIL approval created — candidate ready for review",
+    }

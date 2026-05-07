@@ -25,6 +25,11 @@ import traceback
 from typing import Any
 
 try:
+    import httpx
+except ImportError:
+    httpx = None
+
+try:
     import redis.asyncio as aioredis
 except ImportError:  # pragma: no cover - local test environments may omit redis
     aioredis = None
@@ -106,6 +111,43 @@ def build_idempotency_key(action: str, investigation_id: str, target_or_event: s
     return f"{IDEMPOTENCY_PREFIX}:{normalize_action(action)}:{investigation_id}:{target_or_event}"
 
 
+USER = os.getenv("USER", "worker")  # noqa: SIM112 — document default
+
+AGENT_BASE_URL = os.getenv("AGENT_BASE_URL", "http://agent:8001")
+
+
+async def _notify_agent_candidate(
+    investigation_id: str,
+    drift_event_id: str,
+    model_uri: str,
+) -> bool:
+    """POST to agent to create a HIL approval for the new candidate."""
+    if httpx is None:
+        logger.warning("httpx not available, cannot notify agent")
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{AGENT_BASE_URL}/hil/notify-candidate",
+                json={
+                    "investigation_id": investigation_id,
+                    "drift_event_id": drift_event_id,
+                    "model_uri": model_uri,
+                    "target_model_version": model_uri.split("/")[-1]
+                    if model_uri
+                    else None,
+                },
+            )
+            if resp.status_code == 201:
+                logger.info("agent_notified_hil", model_uri=model_uri)
+                return True
+            logger.warning("agent_hil_rejected", status=resp.status_code)
+            return False
+    except Exception as exc:
+        logger.warning("agent_hil_unreachable", error=str(exc))
+        return False
+
+
 async def handle_retrain(job: dict[str, Any]) -> None:
     if run_training_pipeline is None:
         raise RuntimeError("run_training_pipeline is not available in this environment.")
@@ -117,6 +159,10 @@ async def handle_retrain(job: dict[str, Any]) -> None:
         job.get("dataset_path"),
     )
     logger.info("retrain_complete", model_uri=model_uri)
+
+    investigation_id = job.get("investigation_id", "unknown")
+    drift_event_id = job.get("drift_event_id", investigation_id)
+    await _notify_agent_candidate(investigation_id, drift_event_id, model_uri)
 
 
 async def handle_replay(job: dict[str, Any]) -> None:
