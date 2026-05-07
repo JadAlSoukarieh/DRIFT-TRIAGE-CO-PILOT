@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
@@ -18,6 +19,31 @@ st.set_page_config(
 
 AGENT_BASE_URL = os.getenv("AGENT_BASE_URL", "http://localhost:8001").rstrip("/")
 PLATFORM_BASE_URL = os.getenv("PLATFORM_BASE_URL", "http://localhost:8000").rstrip("/")
+PREDICTION_WINDOW_SIZE = 50
+SAMPLE_PREDICTION_COUNT = 60
+
+
+SAMPLE_PREDICT_PAYLOAD = {
+    "age": 40,
+    "job": "admin.",
+    "marital": "married",
+    "education": "university.degree",
+    "default": "no",
+    "housing": "yes",
+    "loan": "no",
+    "contact": "cellular",
+    "month": "may",
+    "day_of_week": "mon",
+    "campaign": 1,
+    "pdays": 999,
+    "previous": 0,
+    "poutcome": "nonexistent",
+    "emp_var_rate": 1.1,
+    "cons_price_idx": 93.994,
+    "cons_conf_idx": -36.4,
+    "euribor3m": 4.857,
+    "nr_employed": 5191,
+}
 
 
 def get_json(url: str, timeout: int = 5) -> dict[str, Any]:
@@ -91,18 +117,121 @@ def extract_pending_approvals(result: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def drift_summary(result: dict[str, Any] | None) -> tuple[str, str]:
-    if not result:
-        return "Not run", "warning"
-    if not result.get("ok"):
-        return "Failed", "failed"
-    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+def classify_webhook_status(drift_response: dict[str, Any] | None) -> tuple[str, str]:
+    if not drift_response:
+        return "not_run", "neutral"
+    if not drift_response.get("ok"):
+        return "failed", "error"
+    data = drift_response.get("data") if isinstance(drift_response.get("data"), dict) else {}
     webhook_sent = data.get("webhook_sent")
+    webhook_error = str(data.get("webhook_error") or "").lower()
     if webhook_sent is True:
-        return "Webhook sent", "success"
-    if webhook_sent is False:
-        return "Webhook failed", "failed"
-    return "Completed", "success"
+        return "sent", "success"
+    if "suppressed" in webhook_error or "severity unchanged" in webhook_error:
+        return "suppressed", "warning"
+    if "insufficient data" in webhook_error:
+        return "waiting_for_data", "warning"
+    if webhook_sent is False and webhook_error:
+        return "failed", "error"
+    return "not_sent", "neutral"
+
+
+def drift_summary(result: dict[str, Any] | None) -> tuple[str, str]:
+    return classify_webhook_status(result)
+
+
+def build_demo_alert(severity: str, event_id: str) -> dict[str, Any]:
+    numeric_drift = []
+    output_drift = {
+        "psi": 0.01,
+        "positive_rate_reference": 0.11,
+        "positive_rate_current": 0.11,
+        "severity": "stable",
+    }
+    if severity == "moderate":
+        numeric_drift = [{"feature": "euribor3m", "psi": 0.18, "severity": "moderate"}]
+        output_drift = {
+            "psi": 0.16,
+            "positive_rate_reference": 0.11,
+            "positive_rate_current": 0.18,
+            "severity": "moderate",
+        }
+    elif severity == "critical":
+        numeric_drift = [{"feature": "euribor3m", "psi": 0.35, "severity": "critical"}]
+        output_drift = {
+            "psi": 0.22,
+            "positive_rate_reference": 0.11,
+            "positive_rate_current": 0.27,
+            "severity": "critical",
+        }
+    return {
+        "schema_version": "v1",
+        "event_id": event_id,
+        "created_at": "2026-05-07T12:00:00Z",
+        "model_name": "bank_marketing_pipeline",
+        "model_version": "1",
+        "model_alias": "candidate",
+        "severity": severity,
+        "window": {
+            "size": 200,
+            "start": "2026-05-07T11:00:00Z",
+            "end": "2026-05-07T12:00:00Z",
+        },
+        "numeric_drift": numeric_drift,
+        "categorical_drift": [],
+        "output_drift": output_drift,
+    }
+
+
+def send_demo_alert(severity: str) -> None:
+    suffix = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    payload = build_demo_alert(severity, f"dashboard-demo-{severity}-{suffix}")
+    result = post_json(f"{AGENT_BASE_URL}/webhook/drift", payload, timeout=15)
+    st.session_state.last_demo_alert_result = result
+    if result["ok"]:
+        st.session_state.last_action_message = ("success", f"Sent {severity} demo alert.")
+    else:
+        st.session_state.last_action_message = ("error", f"Demo alert failed: {result['error']}")
+    st.rerun()
+
+
+def generate_sample_predictions(count: int = SAMPLE_PREDICTION_COUNT) -> dict[str, Any]:
+    successes = 0
+    failures: list[dict[str, Any]] = []
+    last_response: dict[str, Any] | None = None
+    progress = st.progress(0, text="Generating sample predictions...")
+
+    for index in range(count):
+        payload = dict(SAMPLE_PREDICT_PAYLOAD)
+        payload["campaign"] = 1 + (index % 3)
+        payload["age"] = 35 + (index % 16)
+        payload["euribor3m"] = 4.5 + ((index % 8) * 0.05)
+        result = post_json(f"{PLATFORM_BASE_URL}/predict/", payload, timeout=10)
+        last_response = result
+        if result["ok"]:
+            successes += 1
+        else:
+            failures.append(
+                {
+                    "index": index + 1,
+                    "error": result.get("error"),
+                    "status_code": result.get("status_code"),
+                }
+            )
+            break
+        progress.progress((index + 1) / count, text=f"Generated {index + 1}/{count} sample predictions")
+
+    progress.empty()
+    return {
+        "ok": not failures,
+        "requested": count,
+        "successful": successes,
+        "failed": len(failures),
+        "ready": successes >= PREDICTION_WINDOW_SIZE,
+        "window_size": PREDICTION_WINDOW_SIZE,
+        "last_response": last_response,
+        "errors": failures,
+    }
 
 
 def queue_summary(result: dict[str, Any]) -> tuple[str, str, str]:
@@ -269,6 +398,8 @@ st.markdown(
     .chip { display: inline-block; padding: .28rem .65rem; border-radius: 999px; font-size: .78rem; font-weight: 800; }
     .chip-success, .chip-healthy { color: #065f46; background: #d1fae5; }
     .chip-warning, .chip-pending { color: #92400e; background: #fef3c7; }
+    .chip-neutral { color: #334155; background: #e2e8f0; }
+    .chip-error { color: #991b1b; background: #fee2e2; }
     .chip-failed, .chip-offline { color: #991b1b; background: #fee2e2; }
     .approval-topline { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
     .approval-action { color: #0f172a; font-size: 1.35rem; font-weight: 850; margin-top: .2rem; }
@@ -294,6 +425,10 @@ if "last_drift_result" not in st.session_state:
     st.session_state.last_drift_result = None
 if "last_action_message" not in st.session_state:
     st.session_state.last_action_message = None
+if "last_demo_alert_result" not in st.session_state:
+    st.session_state.last_demo_alert_result = None
+if "sample_predictions_result" not in st.session_state:
+    st.session_state.sample_predictions_result = None
 
 
 platform_health = check_service_health(PLATFORM_BASE_URL)
@@ -319,8 +454,15 @@ st.markdown(
 
 st.markdown(
     '<div class="help-note">Replay/retrain jobs are queued for the worker. '
-    "Production-changing actions require HIL approval.</div>",
+    "Only Production-changing actions like rollback or promotion require HIL approval.</div>",
     unsafe_allow_html=True,
+)
+
+st.info(
+    "Why can Real Drift say Waiting for data while Demo Alert queued a job? "
+    "Real Drift Report uses accumulated predictions and may suppress webhooks. "
+    "Demo Alert sends a synthetic drift event directly to the agent to demonstrate the workflow. "
+    "Critical drift queues retraining as a candidate model; it does not ask for approval because Production is unchanged."
 )
 
 if st.session_state.last_action_message:
@@ -356,17 +498,21 @@ with kpi_cols[2]:
         "HIL inbox",
     )
 with kpi_cols[3]:
-    render_card("Last Drift Report", drift_label, drift_label.lower(), drift_kind, "Platform webhook")
+    render_card("Real Drift Report", drift_label, drift_label, drift_kind, "Platform history monitor")
 
 
 left, right = st.columns([1.65, 1], gap="large")
 
 with left:
     st.subheader("HIL Approval Inbox")
+    st.caption(
+        "Approvals appear only for Production-changing actions: rollback or promote_candidate. "
+        "Stable, replay_test, and retrain-candidate actions do not require approval."
+    )
     if not pending_result["ok"]:
         render_error_card("Pending approvals unavailable", pending_result)
     elif not approvals:
-        st.info("No pending approvals right now.")
+        st.info("No pending approvals right now. Critical demo alerts queue retraining only; they do not touch Production.")
     else:
         for item in approvals:
             approval_card(item)
@@ -376,36 +522,138 @@ with left:
 
 with right:
     st.subheader("Operations")
+
+    st.markdown("**Real Drift Monitoring**")
     st.markdown('<div class="ops-card">', unsafe_allow_html=True)
-    if st.button("Run Drift Report", use_container_width=True):
+    st.caption(
+        "Uses /predict history. A webhook is sent only when there is enough data and severity changes."
+    )
+    if st.button("Generate 60 Sample Predictions", use_container_width=True):
+        result = generate_sample_predictions()
+        st.session_state.sample_predictions_result = result
+        if result["ok"]:
+            st.session_state.last_action_message = (
+                "success",
+                f"Generated {result['successful']} sample predictions for the real drift window.",
+            )
+        else:
+            st.session_state.last_action_message = (
+                "error",
+                f"Prediction generation stopped after {result['successful']} successes.",
+            )
+        st.rerun()
+    if st.button("Run Real Drift Report", use_container_width=True):
         st.session_state.last_drift_result = get_json(f"{PLATFORM_BASE_URL}/drift/report", timeout=20)
         st.rerun()
-    if st.button("Refresh approvals", use_container_width=True):
+    if st.button("Refresh System State", use_container_width=True):
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("**Demo Agent Alerts**")
+    st.markdown('<div class="ops-card">', unsafe_allow_html=True)
+    st.caption(
+        "Bypasses platform and sends synthetic drift directly to the agent. "
+        "Stable resolves, moderate queues replay_test, critical queues retrain candidate. None of these change Production."
+    )
+    demo_col_1, demo_col_2, demo_col_3 = st.columns(3)
+    with demo_col_1:
+        if st.button("Send Stable Demo Alert", use_container_width=True):
+            send_demo_alert("stable")
+    with demo_col_2:
+        if st.button("Send Moderate Demo Alert", use_container_width=True):
+            send_demo_alert("moderate")
+    with demo_col_3:
+        if st.button("Send Critical Demo Alert (queues retrain)", use_container_width=True):
+            send_demo_alert("critical")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    prediction_result = st.session_state.sample_predictions_result
+    if prediction_result:
+        render_state_panel(
+            "Prediction Window Readiness",
+            "ready" if prediction_result.get("ready") else "building",
+            "ready" if prediction_result.get("ready") else "building",
+            "success" if prediction_result.get("ready") else "warning",
+            [
+                ("Generated predictions", prediction_result.get("successful")),
+                ("Required window", prediction_result.get("window_size")),
+                ("Failed requests", prediction_result.get("failed")),
+                ("Ready for /drift/report", prediction_result.get("ready")),
+            ],
+            note=(
+                "The real drift monitor now has enough /predict history."
+                if prediction_result.get("ready")
+                else "Generate at least 50 successful predictions before expecting a real drift webhook."
+            ),
+        )
 
     drift_result = st.session_state.last_drift_result
     if drift_result:
         if drift_result["ok"]:
             data = drift_result.get("data") if isinstance(drift_result.get("data"), dict) else {}
+            webhook_label, webhook_kind = classify_webhook_status(drift_result)
+            report = data.get("report") if isinstance(data.get("report"), dict) else {}
             render_state_panel(
-                "Last Drift Report",
-                "Webhook sent" if data.get("webhook_sent") is True else "Completed",
-                "success" if data.get("webhook_sent") is True else ("failed" if data.get("webhook_sent") is False else "warning"),
-                "success" if data.get("webhook_sent") is True else ("failed" if data.get("webhook_sent") is False else "warning"),
+                "Real Drift Report Status",
+                webhook_label,
+                webhook_label,
+                webhook_kind,
                 [
-                    ("Webhook sent", data.get("webhook_sent", "unknown")),
-                    ("Severity", data.get("severity", data.get("report", {}).get("severity", "unknown"))),
+                    (
+                        "Prediction history",
+                        "building"
+                        if webhook_label == "waiting_for_data"
+                        else ("ready" if st.session_state.sample_predictions_result else "unknown"),
+                    ),
+                    ("Severity", data.get("severity", report.get("severity", "unknown"))),
+                    ("Webhook status", webhook_label),
+                    ("Reason", data.get("webhook_error")),
                     ("Event", data.get("webhook_response", {}).get("drift_event_id") if isinstance(data.get("webhook_response"), dict) else None),
                 ],
                 note=str(data.get("summary") or data.get("message") or data.get("webhook_error") or ""),
             )
-            summary = data.get("summary") or data.get("message") or data.get("webhook_error")
         else:
             render_error_card("Drift report failed", drift_result)
 
+    demo_result = st.session_state.last_demo_alert_result
+    if demo_result:
+        if demo_result["ok"]:
+            data = demo_result.get("data") if isinstance(demo_result.get("data"), dict) else {}
+            render_state_panel(
+                "Agent Demo Alert Result",
+                str(data.get("severity", "unknown")).title(),
+                str(data.get("recommended_action", "unknown")),
+                "success" if data.get("status") in {"resolved", "queued"} else "warning",
+                [
+                    ("Severity", data.get("severity")),
+                    ("Recommended action", data.get("recommended_action")),
+                    ("Status", data.get("status")),
+                    ("Queued", data.get("queued")),
+                    ("Approval required", data.get("requires_approval")),
+                    ("Job ID", data.get("job_id")),
+                    ("Queue", data.get("queue_name")),
+                    ("Dispatch error", data.get("dispatch_error")),
+                ],
+                note=(
+                    str(data.get("summary") or "")
+                    + " Critical retrain creates a candidate only; rollback/promotion would require HIL approval."
+                    if data.get("recommended_action") == "retrain"
+                    else str(data.get("summary") or "")
+                ),
+            )
+        else:
+            render_error_card("Demo alert failed", demo_result)
+
     if queue_result["ok"]:
         queue_data = queue_result.get("data") if isinstance(queue_result.get("data"), dict) else {}
+        dlq_length = queue_data.get("dlq_length")
+        queue_length = queue_data.get("queue_length")
+        if isinstance(dlq_length, int) and dlq_length > 0:
+            queue_note = (
+                "DLQ contains failed/safety jobs. In this demo, rollback safety tests can intentionally go to DLQ."
+            )
+        elif queue_length == 0:
+            queue_note = "Queue is empty. This can mean the worker consumed jobs successfully."
         render_state_panel(
             "Queue / Worker Status",
             queue_label,
@@ -425,6 +673,13 @@ with right:
 
     if registry_result["ok"]:
         registry_data = registry_result.get("data") if isinstance(registry_result.get("data"), dict) else {}
+        candidate_version = registry_data.get("candidate_version")
+        production_version = registry_data.get("production_version")
+        registry_note_lines = []
+        if candidate_version:
+            registry_note_lines.append(f"Latest candidate model version: v{candidate_version}")
+        if production_version is None:
+            registry_note_lines.append("No Production model promoted yet. This is safe: retrain creates candidates only.")
         render_state_panel(
             "Registry / Model Status",
             registry_label,
@@ -437,7 +692,7 @@ with right:
                 ("Last promotion", registry_data.get("last_promotion")),
                 ("Status", registry_data.get("status")),
             ],
-            note=registry_note,
+            note=" ".join(registry_note_lines) or registry_note,
         )
     else:
         render_error_card("Registry / Model Status unavailable", registry_result)
@@ -446,6 +701,8 @@ with right:
         st.json({"platform": platform_health, "agent": agent_health})
     with st.expander("Raw drift report response"):
         st.json(st.session_state.last_drift_result or {})
+    with st.expander("Raw demo alert response"):
+        st.json(st.session_state.last_demo_alert_result or {})
     with st.expander("Raw queue status response"):
         st.json(queue_result)
     with st.expander("Raw registry status response"):
