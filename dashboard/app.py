@@ -70,7 +70,8 @@ def _mlflow_metrics() -> dict:
         }, timeout=5)
         runs = resp.json().get("runs", [])
         if runs:
-            return runs[0].get("data", {}).get("metrics", {})
+            raw = runs[0].get("data", {}).get("metrics", [])
+            return {m["key"]: m["value"] for m in raw if isinstance(m, dict)}
     except Exception:
         pass
     return {}
