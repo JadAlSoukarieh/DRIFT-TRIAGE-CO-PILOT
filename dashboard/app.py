@@ -252,78 +252,71 @@ if st.session_state.rollback_msg:
 reg = _get(f"{PLATFORM}/registry/status")
 if reg:
     prod_ver = reg.get("production_version")
-    prev_ver = reg.get("previous_production_version")
     prod_metrics = reg.get("production_metrics") or {}
     cand_ver = reg.get("candidate_version")
 
-    # Production model card
-    st.markdown("#### Production Model")
     if prod_ver:
-        pc1, pc2, pc3, pc4, pc5 = st.columns(5)
-        with pc1:
-            st.metric("Version", f"v{prod_ver}")
-        with pc2:
-            st.metric("Recall", f"{prod_metrics.get('test_recall', 0):.3f}")
-        with pc3:
-            st.metric("F1", f"{prod_metrics.get('test_f1', 0):.3f}")
-        with pc4:
-            st.metric("AUC", f"{prod_metrics.get('test_roc_auc', 0):.3f}")
-        with pc5:
+        rc1, rc2, rc3, rc4, rc5 = st.columns(5)
+        with rc1:
             st.metric("Model", reg.get("registered_model_name", "—"))
+        with rc2:
+            st.metric("Version", f"v{prod_ver}")
+        with rc3:
+            st.metric("Recall", f"{prod_metrics.get('test_recall', 0):.3f}")
+        with rc4:
+            st.metric("F1", f"{prod_metrics.get('test_f1', 0):.3f}")
+        with rc5:
+            st.metric("AUC", f"{prod_metrics.get('test_roc_auc', 0):.3f}")
 
-        if prod_metrics.get("operating_threshold"):
-            st.caption(f"Threshold: {prod_metrics['operating_threshold']:.4f}")
-
-        if prev_ver:
-            rollback_approval_id = st.text_input("Rollback approval ID", key="rollback_approval_id")
-            rollback_approved_by = st.text_input("Rollback approver", key="rollback_approved_by")
-            rollback_ready = bool(rollback_approval_id.strip())
-            rc1, rc2 = st.columns([1, 4])
-            with rc1:
-                if st.button(
-                    f"Rollback to v{prev_ver}",
-                    key="rollback_btn",
-                    use_container_width=True,
-                    disabled=not rollback_ready,
-                ):
-                    r = _post(
-                        f"{PLATFORM}/registry/rollback",
-                        {
-                            "target_version": prev_ver,
-                            "approval_id": rollback_approval_id.strip(),
-                            "approved_by": rollback_approved_by.strip() or "admin",
-                        },
-                    )
-                    if r.get("status") == "ok":
-                        st.session_state.rollback_msg = (f"Rolled back to v{prev_ver}", "success")
-                    else:
-                        st.session_state.rollback_msg = (r.get("detail", "Rollback failed"), "error")
-                    st.cache_data.clear()
-                    st.rerun()
-            with rc2:
-                st.caption(f"Previous production: v{prev_ver}")
-                if not rollback_ready:
-                    st.caption("Rollback requires an approved HIL rollback approval ID.")
+        if cand_ver:
+            st.caption(f"Candidate: v{cand_ver} — pending approval")
     else:
         st.info("No Production model promoted yet")
 
-    # Candidate model card
-    if cand_ver:
-        st.markdown("#### Candidate Model")
-        st.caption(f"v{cand_ver} — pending approval")
-
-    # Promotion history
+    # Promotion history with rollback
     with st.expander("Promotion History"):
         try:
             hist = requests.get(f"{PLATFORM}/registry/history", timeout=5).json()
             records = hist.get("history", [])
             if records:
-                for rec in records[:10]:
-                    ver = rec["model_uri"].split("/")[-1] if "/" in rec["model_uri"] else rec["model_uri"]
-                    st.caption(
-                        f"{rec['timestamp'][:19]} | {rec['from_alias']} → {rec['to_alias']} | "
-                        f"v{ver} by {rec['approved_by']}"
-                    )
+                rec = records[0]
+                ver = rec["model_uri"].split("/")[-1] if "/" in rec["model_uri"] else rec["model_uri"]
+                prev = rec.get("previous_version")
+                st.caption(
+                    f"{rec['timestamp'][:19]} | {rec['from_alias']} → {rec['to_alias']} | "
+                    f"v{ver} by {rec['approved_by']}"
+                )
+
+                if prev:
+                    rollback_approval_id = st.text_input("Rollback approval ID", key="rollback_approval_id")
+                    rollback_approved_by = st.text_input("Rollback approver", key="rollback_approved_by")
+                    rollback_ready = bool(rollback_approval_id.strip())
+                    bc1, bc2 = st.columns([1, 4])
+                    with bc1:
+                        if st.button(
+                            f"Rollback to v{prev}",
+                            key="rollback_btn",
+                            use_container_width=True,
+                            disabled=not rollback_ready,
+                        ):
+                            r = _post(
+                                f"{PLATFORM}/registry/rollback",
+                                {
+                                    "target_version": prev,
+                                    "approval_id": rollback_approval_id.strip(),
+                                    "approved_by": rollback_approved_by.strip() or "admin",
+                                },
+                            )
+                            if r.get("status") == "ok":
+                                st.session_state.rollback_msg = (f"Rolled back to v{prev}", "success")
+                            else:
+                                st.session_state.rollback_msg = (r.get("detail", "Rollback failed"), "error")
+                            st.cache_data.clear()
+                            st.rerun()
+                    with bc2:
+                        st.caption(f"Rollback target: v{prev}")
+                        if not rollback_ready:
+                            st.caption("Requires an approved HIL rollback approval ID.")
             else:
                 st.caption("No promotions yet.")
         except Exception:

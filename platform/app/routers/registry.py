@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import httpx
 import mlflow
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
 
@@ -60,17 +60,51 @@ async def _previous_production_version(settings) -> str | None:
         import asyncpg
         conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
         try:
-            rows = await conn.fetch(
-                """SELECT model_uri FROM promotion_audit
-                   ORDER BY timestamp DESC LIMIT 2"""
+            row = await conn.fetchrow(
+                """SELECT previous_version FROM promotion_audit
+                   WHERE previous_version IS NOT NULL
+                   ORDER BY timestamp DESC LIMIT 1"""
             )
-            if len(rows) >= 2:
-                return rows[1]["model_uri"].split("/")[-1]
+            if row:
+                return row["previous_version"]
         finally:
             await conn.close()
     except Exception:
         pass
     return None
+
+
+def _capture_current_production(settings) -> str | None:
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    client = MlflowClient()
+    try:
+        prod = client.get_model_version_by_alias(
+            settings.registered_model_name, "Production",
+        )
+        return str(prod.version)
+    except Exception:
+        return None
+
+
+async def _reload_model(request: Request, settings) -> None:
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    try:
+        model = mlflow.sklearn.load_model(
+            f"models:/{settings.registered_model_name}@Production"
+        )
+        request.app.state.model = model
+
+        client = MlflowClient()
+        prod = client.get_model_version_by_alias(
+            settings.registered_model_name, "Production",
+        )
+        if prod.run_id:
+            run = client.get_run(prod.run_id)
+            request.app.state.threshold = run.data.metrics.get(
+                "operating_threshold", settings.threshold,
+            )
+    except Exception:
+        pass
 
 
 @router.get("/status")
@@ -121,6 +155,7 @@ async def promote(
     body: PromoteRequest,
     client: httpx.AsyncClient = Depends(get_http_client),
     settings=Depends(get_settings),
+    request: Request = None,
 ) -> dict:
     if not body.approved_by:
         raise HTTPException(
@@ -136,8 +171,10 @@ async def promote(
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     mlflow_client = MlflowClient()
 
+    previous_version = _capture_current_production(settings)
+
     try:
-        await _write_audit_to_postgres(settings, body)
+        await _write_audit_to_postgres(settings, body, previous_version)
 
         mlflow_client.set_registered_model_alias(
             name=settings.registered_model_name,
@@ -145,10 +182,14 @@ async def promote(
             version=body.model_uri.split("/")[-1],
         )
 
+        if request:
+            await _reload_model(request, settings)
+
         audit_row = {
             "investigation_id": body.investigation_id,
             "approved_by": body.approved_by,
             "model_uri": body.model_uri,
+            "previous_version": previous_version,
             "timestamp": body.timestamp.isoformat(),
         }
         logger = __import__("structlog").get_logger()
@@ -171,6 +212,7 @@ async def promote(
 async def rollback(
     body: RollbackRequest,
     settings=Depends(get_settings),
+    request: Request = None,
 ) -> dict:
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     mlflow_client = MlflowClient()
@@ -188,18 +230,25 @@ async def rollback(
             detail=f"Model version {body.target_version} not found in registry.",
         )
 
+    previous_version = _capture_current_production(settings)
+
     try:
-        await _write_rollback_audit(settings, body, approval)
+        await _write_rollback_audit(settings, body, approval, previous_version)
 
         mlflow_client.set_registered_model_alias(
             name=settings.registered_model_name,
             alias="Production",
             version=body.target_version,
         )
+
+        if request:
+            await _reload_model(request, settings)
+
         logger = __import__("structlog").get_logger()
         logger.info(
             "rollback_executed",
             target_version=body.target_version,
+            previous_version=previous_version,
             approval_id=body.approval_id,
             approved_by=body.approved_by,
         )
@@ -222,7 +271,7 @@ async def registry_history(settings=Depends(get_settings)) -> dict:
         try:
             rows = await conn.fetch(
                 """SELECT model_uri, investigation_id, approved_by, timestamp,
-                          from_alias, to_alias
+                          from_alias, to_alias, previous_version
                    FROM promotion_audit
                    ORDER BY timestamp DESC
                    LIMIT 50"""
@@ -235,6 +284,7 @@ async def registry_history(settings=Depends(get_settings)) -> dict:
                     "timestamp": row["timestamp"].isoformat(),
                     "from_alias": row["from_alias"],
                     "to_alias": row["to_alias"],
+                    "previous_version": row["previous_version"],
                 })
         finally:
             await conn.close()
@@ -244,31 +294,31 @@ async def registry_history(settings=Depends(get_settings)) -> dict:
     return {"history": records}
 
 
-async def _write_audit_to_postgres(settings, body) -> None:
+async def _write_audit_to_postgres(settings, body, previous_version: str | None = None) -> None:
     import asyncpg
 
     conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
     try:
         await conn.execute(
-            "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias) "
-            "VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias, previous_version) "
+            "VALUES ($1, $2, $3, $4, $5, $6)",
             body.model_uri, body.investigation_id, body.approved_by,
-            "candidate", "Production",
+            "candidate", "Production", previous_version,
         )
     finally:
         await conn.close()
 
 
-async def _write_rollback_audit(settings, body: RollbackRequest, approval: dict) -> None:
+async def _write_rollback_audit(settings, body: RollbackRequest, approval: dict, previous_version: str | None = None) -> None:
     import asyncpg
 
     conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
     try:
         await conn.execute(
-            "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias) "
-            "VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias, previous_version) "
+            "VALUES ($1, $2, $3, $4, $5, $6)",
             body.target_version, approval["investigation_id"], body.approved_by,
-            "Production", "Production",
+            "Production", "Production", previous_version,
         )
     finally:
         await conn.close()
