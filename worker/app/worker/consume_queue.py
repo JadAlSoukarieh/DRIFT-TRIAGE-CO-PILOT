@@ -222,6 +222,13 @@ async def handle_replay(job: dict[str, Any]) -> None:
 async def handle_rollback(job: dict[str, Any]) -> None:
     investigation_id = job.get("investigation_id", "unknown")
     target_version = job.get("target_model_version") or job.get("model_version")
+    approval_id = job.get("approval_id")
+
+    if not approval_id:
+        raise RuntimeError(
+            f"Rollback refused: no approval_id provided. "
+            f"investigation_id={investigation_id}."
+        )
 
     if not target_version:
         raise RuntimeError(
@@ -244,7 +251,11 @@ async def handle_rollback(job: dict[str, Any]) -> None:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{PLATFORM_BASE_URL}/registry/rollback",
-                json={"target_version": target_version, "approved_by": approved_by},
+                json={
+                    "target_version": target_version,
+                    "approval_id": approval_id,
+                    "approved_by": approved_by,
+                },
             )
             resp.raise_for_status()
             result = resp.json()
