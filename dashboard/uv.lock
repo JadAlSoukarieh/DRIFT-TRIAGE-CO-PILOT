@@ -174,11 +174,15 @@ name = "dashboard"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "requests" },
     { name = "streamlit" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "streamlit", specifier = ">=1.35" }]
+requires-dist = [
+    { name = "requests", specifier = ">=2.32.0" },
+    { name = "streamlit", specifier = ">=1.35.0" },
+]
 
 [[package]]
 name = "gitdb"
