@@ -114,6 +114,7 @@ def build_idempotency_key(action: str, investigation_id: str, target_or_event: s
 USER = os.getenv("USER", "worker")  # noqa: SIM112 — document default
 
 AGENT_BASE_URL = os.getenv("AGENT_BASE_URL", "http://agent:8001")
+PLATFORM_BASE_URL = os.getenv("PLATFORM_BASE_URL", "http://platform:8000")
 
 
 async def _notify_agent_candidate(
@@ -220,26 +221,41 @@ async def handle_replay(job: dict[str, Any]) -> None:
 
 async def handle_rollback(job: dict[str, Any]) -> None:
     investigation_id = job.get("investigation_id", "unknown")
-    approval_id = job.get("approval_id") or job.get("hil_approval_id")
+    target_version = job.get("target_model_version") or job.get("model_version")
 
-    if not approval_id:
+    if not target_version:
         raise RuntimeError(
-            f"Rollback refused: no approval_id provided. "
-            f"investigation_id={investigation_id}. "
-            "Rollback requires HIL approval before execution."
+            f"Rollback refused: no target_model_version provided. "
+            f"investigation_id={investigation_id}."
         )
 
+    approved_by = job.get("approved_by", "worker")
+
     logger.info(
-        "rollback_stub",
+        "rollback_start",
         investigation_id=investigation_id,
-        approval_id=approval_id,
-        note="Rollback handler is approved but not yet fully implemented. "
-             "Pushing to DLQ with structured reason.",
+        target_version=target_version,
     )
-    raise RuntimeError(
-        f"Rollback approved (approval_id={approval_id}) but handler not implemented. "
-        "Manual registry intervention required."
-    )
+
+    if httpx is None:
+        raise RuntimeError("httpx not available for rollback dispatch.")
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{PLATFORM_BASE_URL}/registry/rollback",
+                json={"target_version": target_version, "approved_by": approved_by},
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            logger.info(
+                "rollback_complete",
+                investigation_id=investigation_id,
+                target_version=target_version,
+                new_production=result.get("production_version"),
+            )
+    except Exception as exc:
+        raise RuntimeError(f"Rollback failed: {exc}") from exc
 
 
 HANDLERS = {
