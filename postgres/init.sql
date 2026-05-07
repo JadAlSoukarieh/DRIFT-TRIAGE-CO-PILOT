@@ -46,8 +46,12 @@ CREATE TABLE IF NOT EXISTS promotion_audit (
     approved_by TEXT NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     from_alias TEXT NULL,
-    to_alias TEXT NOT NULL DEFAULT 'Production'
+    to_alias TEXT NOT NULL DEFAULT 'Production',
+    previous_version TEXT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_promotion_audit_model_uri
     ON promotion_audit (model_uri);
+
+CREATE INDEX IF NOT EXISTS idx_promotion_audit_timestamp
+    ON promotion_audit (timestamp DESC);
