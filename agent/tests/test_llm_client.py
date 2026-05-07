@@ -69,7 +69,7 @@ class LLMClientTests(unittest.TestCase):
             "AZURE_OPENAI_ENDPOINT=https://example.openai.azure.com/openai/v1"
         )
 
-        self.assertEqual(endpoint, "https://example.openai.azure.com/openai/v1")
+        self.assertEqual(endpoint, "https://example.openai.azure.com")
 
     def test_azure_endpoint_without_protocol_raises_safe_error(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "Invalid AZURE_OPENAI_ENDPOINT"):

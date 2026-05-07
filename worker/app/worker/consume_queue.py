@@ -25,6 +25,11 @@ import traceback
 from typing import Any
 
 try:
+    import httpx
+except ImportError:
+    httpx = None
+
+try:
     import redis.asyncio as aioredis
 except ImportError:  # pragma: no cover - local test environments may omit redis
     aioredis = None
@@ -106,6 +111,46 @@ def build_idempotency_key(action: str, investigation_id: str, target_or_event: s
     return f"{IDEMPOTENCY_PREFIX}:{normalize_action(action)}:{investigation_id}:{target_or_event}"
 
 
+USER = os.getenv("USER", "worker")  # noqa: SIM112 — document default
+
+AGENT_BASE_URL = os.getenv("AGENT_BASE_URL", "http://agent:8001")
+PLATFORM_BASE_URL = os.getenv("PLATFORM_BASE_URL", "http://platform:8000")
+
+
+async def _notify_agent_candidate(
+    investigation_id: str,
+    drift_event_id: str,
+    model_uri: str,
+    metrics: dict[str, float] | None = None,
+) -> bool:
+    """POST to agent to create a HIL approval for the new candidate."""
+    if httpx is None:
+        logger.warning("httpx not available, cannot notify agent")
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{AGENT_BASE_URL}/hil/notify-candidate",
+                json={
+                    "investigation_id": investigation_id,
+                    "drift_event_id": drift_event_id,
+                    "model_uri": model_uri,
+                    "target_model_version": model_uri.split("/")[-1]
+                    if model_uri
+                    else None,
+                    "metrics": metrics or {},
+                },
+            )
+            if resp.status_code == 201:
+                logger.info("agent_notified_hil", model_uri=model_uri)
+                return True
+            logger.warning("agent_hil_rejected", status=resp.status_code)
+            return False
+    except Exception as exc:
+        logger.warning("agent_hil_unreachable", error=str(exc))
+        return False
+
+
 async def handle_retrain(job: dict[str, Any]) -> None:
     if run_training_pipeline is None:
         raise RuntimeError("run_training_pipeline is not available in this environment.")
@@ -117,6 +162,24 @@ async def handle_retrain(job: dict[str, Any]) -> None:
         job.get("dataset_path"),
     )
     logger.info("retrain_complete", model_uri=model_uri)
+
+    investigation_id = job.get("investigation_id", "unknown")
+    drift_event_id = job.get("drift_event_id", investigation_id)
+
+    metrics: dict[str, float] = {}
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
+        client = mlflow.MlflowClient()
+        runs = client.search_runs(
+            experiment_ids=["1"], order_by=["start_time DESC"], max_results=1,
+        )
+        if runs:
+            metrics = dict(runs[0].data.metrics)
+    except Exception:
+        pass
+
+    await _notify_agent_candidate(investigation_id, drift_event_id, model_uri, metrics)
 
 
 async def handle_replay(job: dict[str, Any]) -> None:
@@ -158,26 +221,41 @@ async def handle_replay(job: dict[str, Any]) -> None:
 
 async def handle_rollback(job: dict[str, Any]) -> None:
     investigation_id = job.get("investigation_id", "unknown")
-    approval_id = job.get("approval_id") or job.get("hil_approval_id")
+    target_version = job.get("target_model_version") or job.get("model_version")
 
-    if not approval_id:
+    if not target_version:
         raise RuntimeError(
-            f"Rollback refused: no approval_id provided. "
-            f"investigation_id={investigation_id}. "
-            "Rollback requires HIL approval before execution."
+            f"Rollback refused: no target_model_version provided. "
+            f"investigation_id={investigation_id}."
         )
 
+    approved_by = job.get("approved_by", "worker")
+
     logger.info(
-        "rollback_stub",
+        "rollback_start",
         investigation_id=investigation_id,
-        approval_id=approval_id,
-        note="Rollback handler is approved but not yet fully implemented. "
-             "Pushing to DLQ with structured reason.",
+        target_version=target_version,
     )
-    raise RuntimeError(
-        f"Rollback approved (approval_id={approval_id}) but handler not implemented. "
-        "Manual registry intervention required."
-    )
+
+    if httpx is None:
+        raise RuntimeError("httpx not available for rollback dispatch.")
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{PLATFORM_BASE_URL}/registry/rollback",
+                json={"target_version": target_version, "approved_by": approved_by},
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            logger.info(
+                "rollback_complete",
+                investigation_id=investigation_id,
+                target_version=target_version,
+                new_production=result.get("production_version"),
+            )
+    except Exception as exc:
+        raise RuntimeError(f"Rollback failed: {exc}") from exc
 
 
 HANDLERS = {

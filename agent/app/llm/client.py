@@ -31,8 +31,12 @@ def _build_chat_model():
     if provider == "azure":
         from langchain_openai import AzureChatOpenAI
 
+        endpoint = settings.AZURE_OPENAI_ENDPOINT
+        if "/openai" in endpoint:
+            endpoint = _normalize_azure_endpoint(endpoint)
+
         return AzureChatOpenAI(
-            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+            azure_endpoint=endpoint,
             api_key=settings.AZURE_OPENAI_API_KEY,
             api_version=settings.AZURE_OPENAI_API_VERSION,
             azure_deployment=settings.AZURE_STRONG_MODEL,
@@ -64,8 +68,11 @@ def _normalize_azure_endpoint(endpoint: str) -> str:
             "Did you forget https://?"
         )
     if endpoint.startswith("AZURE_OPENAI_ENDPOINT="):
-        return endpoint.partition("=")[2]
-    return endpoint
+        endpoint = endpoint.partition("=")[2]
+    # Strip trailing path suffix — langchain_openai appends /openai/deployments/... itself
+    if endpoint.rstrip("/").endswith("/openai/v1"):
+        endpoint = endpoint[: endpoint.rstrip("/").rfind("/openai/v1")]
+    return endpoint.rstrip("/")
 
 
 def complete_json(
