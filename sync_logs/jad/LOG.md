@@ -667,6 +667,156 @@ feature/agent-hil-routes
 ### Next Safe Task
 Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
 
+## 2026-05-06 - Jad / Codex Full App Validation
+
+### Goal
+Ran full app validation after latest merges and Docker rebuild.
+
+### Branch
+main
+
+### Latest Commit
+`cd8058e` - `Merge pull request #10 from hadiMahd/main`
+
+### Commands Run
+- `git status`
+- `git branch --show-current`
+- `git log --oneline --decorate -10`
+- `git fetch origin --prune`
+- `git checkout main`
+- `git pull origin main`
+- `docker --version`
+- `docker compose version`
+- `docker compose config --quiet`
+- `python -m unittest discover -s agent/tests -p "test_*.py"`
+- `cd platform && .\.venv\Scripts\python.exe -m pytest tests -v -p no:cacheprovider`
+- `python -m py_compile dashboard/app.py`
+- `platform\.venv\Scripts\python.exe -m pytest worker\app\worker\test_handlers.py -v -p no:cacheprovider`
+- `docker compose ps`
+- `Invoke-RestMethod http://127.0.0.1:8000/health`
+- `Invoke-RestMethod http://127.0.0.1:8001/health`
+- `Invoke-WebRequest http://127.0.0.1:8501 -UseBasicParsing`
+- `Invoke-WebRequest http://127.0.0.1:5000 -UseBasicParsing`
+- `Invoke-RestMethod http://127.0.0.1:8000/drift/report`
+- `Invoke-RestMethod http://127.0.0.1:8000/queue/status`
+- `Invoke-RestMethod http://127.0.0.1:8000/registry/status`
+- `Invoke-RestMethod http://127.0.0.1:8001/hil/pending`
+- `Invoke-RestMethod http://127.0.0.1:8001/webhook/drift` with stable, moderate, and critical payloads
+- `docker compose exec agent uv run --project /app/agent python -c "...create_pending_approval..."`
+- `Invoke-RestMethod http://127.0.0.1:8001/hil/{approval_id}`
+- `Invoke-RestMethod http://127.0.0.1:8001/hil/{approval_id}/approve`
+- `docker compose exec redis redis-cli LLEN drift-triage-jobs`
+- `docker compose exec redis redis-cli LLEN DLQ:drift-triage-jobs`
+- `docker compose logs --tail=300 worker`
+- `Invoke-RestMethod http://127.0.0.1:8000/predict/`
+
+### Test Results
+- Agent tests: requested legacy `unittest` command failed because merged repo now includes pytest-based agent tests.
+- Platform tests: `24 passed, 1 skipped`
+- Dashboard compile: passed
+- Docker compose config: passed
+- Worker tests: `4 passed`
+
+### Service Results
+- Compose startup: passed
+- Platform health: passed
+- Agent health: passed
+- Dashboard: HTTP 200
+- MLflow: HTTP 200
+- Postgres: healthy
+- Redis: healthy
+
+### Endpoint Results
+- `/drift/report`: HTTP 200, returns stable drift report, suppresses webhook until enough history and severity change.
+- `/queue/status`: queue healthy, Redis connected, worker polling.
+- `/registry/status`: model visible, candidate version advanced to `2`, no Production alias set.
+- `/hil/pending`: empty by default, smoke approval create/list/approve flow worked.
+- `/predict`: valid sample returned HTTP 200 with prediction and probability.
+
+### Scenario Results
+- stable drift: `none`, resolved
+- moderate drift: `replay_test`, queued and consumed
+- critical drift: `retrain`, queued and consumed
+- replay worker: completed with `rows_checked=1`, `avg_score=0.2062`
+- retrain worker: completed, registered candidate version `2`
+- rollback safety: missing approval refused and DLQ'd; approved rollback still DLQ'd as intentionally not implemented
+- HIL approve/reject: approve flow worked for smoke approval
+
+### Dashboard Results
+Dashboard is reachable and serving over Streamlit. Full browser-level visual verification remains a manual spot check.
+
+### MLflow Results
+MLflow is reachable. Validation confirmed `bank_marketing_pipeline` candidate version `2`. Ignore any `MLflow GenAI Demo` sample data shown in the UI.
+
+### Blockers
+- Agent local test runner command should move from `unittest` to pytest-aware execution.
+- Host `uv` still has cache permission issues on this Windows/OneDrive path without overrides.
+- `/drift/report` behavior changed under real drift accumulation and no longer guarantees immediate webhook emission on a fresh stack.
+- Early malformed manual smoke jobs created JSON decode errors in worker logs before the valid rollback safety run.
+
+### Final Verdict
+PASS WITH BLOCKERS
+
+## 2026-05-07 - Jad / Codex Dashboard UX Clarification
+
+### Goal
+Improved dashboard UX so webhook suppression, demo drift alerts, and DLQ behavior are explained correctly during the demo.
+
+### Files Changed
+- `dashboard/app.py`
+- `sync_logs/jad/LOG.md`
+
+### Checks Run
+- `python -m py_compile dashboard/app.py`
+- `docker compose config --quiet`
+
+### Results
+- Dashboard now distinguishes `webhook sent`, `webhook suppressed`, `waiting for data`, and real webhook failure.
+- Added stable, moderate, and critical demo alert buttons that post valid DriftAlert payloads to the agent.
+- Added clearer queue guidance:
+  - DLQ warning explains rollback safety jobs
+  - empty queue note explains successful worker consumption
+- Added clearer registry guidance for candidate vs Production state.
+- Added a single `Refresh System State` control for health, queue, registry, and approvals.
+
+### Notes
+- The current platform drift accumulator intentionally suppresses webhook emission when severity is unchanged or there is not enough prediction history.
+- Raw JSON remains inside expanders only.
+
+## 2026-05-07 - Jad / Codex Dashboard Flow Split
+
+### Goal
+Separated real platform drift monitoring from manual demo alert flow so the dashboard is understandable during demos.
+
+### Files Changed
+- `dashboard/app.py`
+- `sync_logs/jad/LOG.md`
+
+### Checks Run
+- `python -m py_compile dashboard/app.py`
+- `docker compose config --quiet`
+
+### Results
+- Real drift monitoring and demo agent alerts are now shown as separate sections.
+- `Last Drift Report` is now `Real Drift Report Status`.
+- `Last Demo Alert` is now `Agent Demo Alert Result`.
+- Webhook states now distinguish:
+  - sent
+  - waiting for data
+  - suppressed
+  - failed
+- Queue wording now explains:
+  - empty queue can mean successful worker consumption
+  - DLQ can contain intentional rollback safety jobs
+- Registry wording now explains:
+  - latest candidate version
+  - no Production promotion yet is expected and safe
+
+### Notes
+- No backend behavior changed.
+- Real drift uses platform prediction history.
+- Demo alerts bypass platform drift history and post directly to the agent.
+
 ## 2026-05-06 - Jad / Codex
 
 ### Goal
@@ -1124,3 +1274,119 @@ CI/docs/release hardening, or clear/inspect historical DLQ items if you want a c
 
 ### Next Safe Task
 Wire graph action decisions to create HIL approval for Production-impacting actions, or start dashboard HIL inbox.
+
+## 2026-05-07 - Jad / Codex Dashboard Demo Clarity
+
+### Goal
+Improved dashboard demo clarity by separating real drift monitoring from synthetic agent demo alerts.
+
+### Files Changed
+- `dashboard/app.py`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `python -m py_compile dashboard/app.py`
+- `docker compose config --quiet`
+- `docker compose up -d --build dashboard`
+- `Invoke-WebRequest http://127.0.0.1:8501 -UseBasicParsing`
+
+### Results
+- dashboard compile: passed
+- docker compose config: passed
+- dashboard rebuild/restart: passed
+- dashboard HTTP check: 200
+
+### Dashboard Updates
+- Added a Real Drift Monitoring section for `/predict` history and `/drift/report`.
+- Added a Generate 60 Sample Predictions button.
+- Added a prediction window readiness indicator.
+- Updated webhook labels to `waiting_for_data`, `suppressed`, `sent`, and `failed`.
+- Added a separate Agent Demo Alerts section for direct synthetic `/webhook/drift` calls.
+- Clarified that real drift uses platform prediction history while demo alerts bypass platform history.
+
+### Backend Changes
+- None.
+
+### Next Safe Task
+Hard-refresh the browser and run the demo flow from the dashboard.
+
+## 2026-05-07 - Jad / Codex Demo Readiness Check
+
+### Goal
+Reviewed the assignment brief, verified the dashboard 60-prediction flow, ran local endpoint/test checks, and prepared demo guidance.
+
+### Files Changed
+- `reports/demo_readiness_2026-05-07.md`
+- `sync_logs/jad/LOG.md`
+
+### Commands Run
+- `python -m py_compile dashboard/app.py`
+- `docker compose config --quiet`
+- `Invoke-RestMethod http://127.0.0.1:8000/health`
+- `Invoke-RestMethod http://127.0.0.1:8001/health`
+- `Invoke-WebRequest http://127.0.0.1:8501 -UseBasicParsing`
+- `Invoke-WebRequest http://127.0.0.1:5000 -UseBasicParsing`
+- 60x `POST http://127.0.0.1:8000/predict/`
+- `Invoke-RestMethod http://127.0.0.1:8000/drift/report`
+- stable/moderate/critical `POST http://127.0.0.1:8001/webhook/drift`
+- `Invoke-RestMethod http://127.0.0.1:8000/queue/status`
+- `Invoke-RestMethod http://127.0.0.1:8000/registry/status`
+- `Invoke-RestMethod http://127.0.0.1:8001/hil/pending`
+- `docker compose exec redis redis-cli LLEN drift-triage-jobs`
+- `docker compose exec redis redis-cli LLEN DLQ:drift-triage-jobs`
+- `docker compose logs --tail=120 worker`
+- platform pytest suite
+- worker pytest suite
+- agent pytest suite excluding the worker-import contract file
+
+### Results
+- 60 sample predictions: passed, 60/60 successful.
+- Real drift report: stable, webhook suppressed because severity was unchanged.
+- Demo stable alert: resolved with no action.
+- Demo moderate alert: queued `replay_test`.
+- Demo critical alert: queued `retrain`.
+- Worker replay: completed.
+- Worker retrain: completed and registered candidate version `6`.
+- Redis queue: `0`.
+- Redis DLQ: `2`, from intentional rollback safety cases.
+- HIL inbox: one safe pending demo rollback approval created for presentation.
+- Platform tests: `24 passed, 1 skipped`.
+- Worker tests: `4 passed`.
+- Agent tests: `51 passed` in container with `test_dispatch_tools.py` ignored due missing worker package in the agent image.
+
+### Assignment Caveat
+LangGraph checkpoint resume is prepared and documented, but not fully used as the main recovery mechanism yet.
+
+### Next Safe Task
+Use the dashboard demo script and tag the final release after review.
+
+## 2026-05-07 - Jad / Codex Workflow Documentation
+
+### Goal
+Created a clear workflow document explaining how the full app runs and how to present the dashboard demo.
+
+### Files Changed
+- `WORKFLOW.md`
+- `sync_logs/jad/LOG.md`
+
+### Checks Run
+- `docker compose ps`
+- `Invoke-RestMethod http://127.0.0.1:8000/health`
+- `Invoke-RestMethod http://127.0.0.1:8001/health`
+- `Invoke-WebRequest http://127.0.0.1:8501 -UseBasicParsing`
+- `Invoke-RestMethod http://127.0.0.1:8000/queue/status`
+- `Invoke-RestMethod http://127.0.0.1:8000/registry/status`
+- `Invoke-RestMethod http://127.0.0.1:8001/hil/pending`
+
+### Results
+- Docker stack is running.
+- Platform health: ok.
+- Agent health: ok.
+- Dashboard: HTTP 200.
+- Queue and registry endpoints respond.
+- HIL pending endpoint responds.
+
+### Notes
+- Workflow document explains real drift monitoring vs synthetic demo alerts.
+- Workflow document explains why critical retrain does not require HIL approval.
+- Workflow document includes the Friday demo script and checkpoint caveat.
