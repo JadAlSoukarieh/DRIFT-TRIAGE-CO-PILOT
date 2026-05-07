@@ -95,6 +95,10 @@ services:
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-drift-triage-copilot}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-true}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-week-5-drift-copilot}
     depends_on:
       postgres:
         condition: service_healthy
