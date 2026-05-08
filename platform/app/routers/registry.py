@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import httpx
 import mlflow
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
 
@@ -25,6 +25,7 @@ router = APIRouter()
 class RollbackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target_version: str
+    approval_id: str
     approved_by: str
 
 
@@ -59,17 +60,51 @@ async def _previous_production_version(settings) -> str | None:
         import asyncpg
         conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
         try:
-            rows = await conn.fetch(
-                """SELECT model_uri FROM promotion_audit
-                   ORDER BY timestamp DESC LIMIT 2"""
+            row = await conn.fetchrow(
+                """SELECT previous_version FROM promotion_audit
+                   WHERE previous_version IS NOT NULL
+                   ORDER BY timestamp DESC LIMIT 1"""
             )
-            if len(rows) >= 2:
-                return rows[1]["model_uri"].split("/")[-1]
+            if row:
+                return row["previous_version"]
         finally:
             await conn.close()
     except Exception:
         pass
     return None
+
+
+def _capture_current_production(settings) -> str | None:
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    client = MlflowClient()
+    try:
+        prod = client.get_model_version_by_alias(
+            settings.registered_model_name, "Production",
+        )
+        return str(prod.version)
+    except Exception:
+        return None
+
+
+async def _reload_model(request: Request, settings) -> None:
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    try:
+        model = mlflow.sklearn.load_model(
+            f"models:/{settings.registered_model_name}@Production"
+        )
+        request.app.state.model = model
+
+        client = MlflowClient()
+        prod = client.get_model_version_by_alias(
+            settings.registered_model_name, "Production",
+        )
+        if prod.run_id:
+            run = client.get_run(prod.run_id)
+            request.app.state.threshold = run.data.metrics.get(
+                "operating_threshold", settings.threshold,
+            )
+    except Exception:
+        pass
 
 
 @router.get("/status")
@@ -120,6 +155,7 @@ async def promote(
     body: PromoteRequest,
     client: httpx.AsyncClient = Depends(get_http_client),
     settings=Depends(get_settings),
+    request: Request = None,
 ) -> dict:
     if not body.approved_by:
         raise HTTPException(
@@ -135,23 +171,29 @@ async def promote(
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     mlflow_client = MlflowClient()
 
+    previous_version = _capture_current_production(settings)
+
     try:
+        await _write_audit_to_postgres(settings, body, previous_version)
+
         mlflow_client.set_registered_model_alias(
             name=settings.registered_model_name,
             alias="Production",
             version=body.model_uri.split("/")[-1],
         )
 
+        if request:
+            await _reload_model(request, settings)
+
         audit_row = {
             "investigation_id": body.investigation_id,
             "approved_by": body.approved_by,
             "model_uri": body.model_uri,
+            "previous_version": previous_version,
             "timestamp": body.timestamp.isoformat(),
         }
         logger = __import__("structlog").get_logger()
         logger.info("promotion_audit", **audit_row)
-
-        await _write_audit_to_postgres(settings, body)
 
     except Exception as exc:
         raise HTTPException(
@@ -170,9 +212,12 @@ async def promote(
 async def rollback(
     body: RollbackRequest,
     settings=Depends(get_settings),
+    request: Request = None,
 ) -> dict:
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     mlflow_client = MlflowClient()
+
+    approval = await _validate_rollback_approval(settings, body)
 
     try:
         mlflow_client.get_model_version(
@@ -185,21 +230,28 @@ async def rollback(
             detail=f"Model version {body.target_version} not found in registry.",
         )
 
+    previous_version = _capture_current_production(settings)
+
     try:
+        await _write_rollback_audit(settings, body, approval, previous_version)
+
         mlflow_client.set_registered_model_alias(
             name=settings.registered_model_name,
             alias="Production",
             version=body.target_version,
         )
 
+        if request:
+            await _reload_model(request, settings)
+
         logger = __import__("structlog").get_logger()
         logger.info(
             "rollback_executed",
             target_version=body.target_version,
+            previous_version=previous_version,
+            approval_id=body.approval_id,
             approved_by=body.approved_by,
         )
-
-        await _write_rollback_audit(settings, body)
 
     except Exception as exc:
         raise HTTPException(
@@ -219,7 +271,7 @@ async def registry_history(settings=Depends(get_settings)) -> dict:
         try:
             rows = await conn.fetch(
                 """SELECT model_uri, investigation_id, approved_by, timestamp,
-                          from_alias, to_alias
+                          from_alias, to_alias, previous_version
                    FROM promotion_audit
                    ORDER BY timestamp DESC
                    LIMIT 50"""
@@ -232,6 +284,7 @@ async def registry_history(settings=Depends(get_settings)) -> dict:
                     "timestamp": row["timestamp"].isoformat(),
                     "from_alias": row["from_alias"],
                     "to_alias": row["to_alias"],
+                    "previous_version": row["previous_version"],
                 })
         finally:
             await conn.close()
@@ -241,33 +294,73 @@ async def registry_history(settings=Depends(get_settings)) -> dict:
     return {"history": records}
 
 
-async def _write_audit_to_postgres(settings, body) -> None:
+async def _write_audit_to_postgres(settings, body, previous_version: str | None = None) -> None:
+    import asyncpg
+
+    conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
     try:
-        import asyncpg
-        dsn = _pg_dsn(settings)
-        conn = await asyncpg.connect(dsn, timeout=5)
         await conn.execute(
-            "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias) "
-            "VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias, previous_version) "
+            "VALUES ($1, $2, $3, $4, $5, $6)",
             body.model_uri, body.investigation_id, body.approved_by,
-            "candidate", "Production",
+            "candidate", "Production", previous_version,
         )
+    finally:
         await conn.close()
-    except Exception:
-        pass
 
 
-async def _write_rollback_audit(settings, body: RollbackRequest) -> None:
+async def _write_rollback_audit(settings, body: RollbackRequest, approval: dict, previous_version: str | None = None) -> None:
+    import asyncpg
+
+    conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
+    try:
+        await conn.execute(
+            "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias, previous_version) "
+            "VALUES ($1, $2, $3, $4, $5, $6)",
+            body.target_version, approval["investigation_id"], body.approved_by,
+            "Production", "Production", previous_version,
+        )
+    finally:
+        await conn.close()
+
+
+async def _validate_rollback_approval(settings, body: RollbackRequest) -> dict:
+    if not body.approval_id:
+        raise HTTPException(
+            status_code=422,
+            detail="approval_id is required for rollback.",
+        )
+
     try:
         import asyncpg
-        dsn = _pg_dsn(settings)
-        conn = await asyncpg.connect(dsn, timeout=5)
-        await conn.execute(
-            "INSERT INTO promotion_audit (model_uri, investigation_id, approved_by, from_alias, to_alias) "
-            "VALUES ($1, $2, $3, $4, $5)",
-            body.target_version, "rollback", body.approved_by,
-            "Production", "Production",
+
+        conn = await asyncpg.connect(_pg_dsn(settings), timeout=5)
+        try:
+            row = await conn.fetchrow(
+                """SELECT approval_id, investigation_id, requested_action,
+                          target_model_version, status, approved_by
+                   FROM hil_approvals
+                   WHERE approval_id = $1""",
+                body.approval_id,
+            )
+        finally:
+            await conn.close()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Rollback approval check failed: {exc}",
+        ) from exc
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Rollback approval not found.")
+    if row["status"] != "approved":
+        raise HTTPException(status_code=409, detail="Rollback approval is not approved.")
+    if row["requested_action"] != "rollback":
+        raise HTTPException(status_code=409, detail="Approval is not for rollback.")
+    if row["target_model_version"] and str(row["target_model_version"]) != str(body.target_version):
+        raise HTTPException(
+            status_code=409,
+            detail="Approval target version does not match rollback target.",
         )
-        await conn.close()
-    except Exception:
-        pass
+
+    return dict(row)

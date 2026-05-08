@@ -76,6 +76,8 @@ def test_openapi_schema(test_client):
     assert "/drift/report" in schema["paths"]
     assert "/registry/promote" in schema["paths"]
     assert "/registry/status" in schema["paths"]
+    assert "/registry/history" in schema["paths"]
+    assert "/registry/rollback" in schema["paths"]
     assert "/queue/status" in schema["paths"]
 
 
@@ -173,3 +175,14 @@ def test_promote_requires_approved_by(test_client):
     response = test_client.post("/registry/promote", json=payload)
     assert response.status_code == 422
     assert "approved_by" in response.json()["detail"]
+
+
+def test_rollback_requires_approval_id(test_client):
+    """POST /registry/rollback rejects rollback without HIL approval_id."""
+    payload = {
+        "target_version": "1",
+        "approved_by": "jad",
+    }
+    response = test_client.post("/registry/rollback", json=payload)
+    assert response.status_code == 422
+    assert "approval_id" in str(response.json()["detail"])
